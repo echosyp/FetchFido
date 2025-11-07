@@ -1,0 +1,202 @@
+# FetchFido
+
+A security-hardened Go web service for receiving and visualizing GPS data over UDP. Built for learning Podman/Kubernetes deployment with a focus on security best practices and minimal container footprint.
+
+## Features
+
+- **UDP Data Reception**: Listens for GPS coordinates and arbitrary data over UDP
+- **Real-time GPS Visualization**: Interactive map powered by Leaflet.js displaying GPS locations
+- **Multiple GPS Format Support**:
+  - JSON format: `{"lat": 40.7128, "lon": -74.0060}`
+  - Comma-separated: `40.7128,-74.0060`
+  - Space-separated: `40.7128 -74.0060`
+- **TLS 1.3 Support**: Optional HTTPS encryption for secure communication
+- **Health & Info Endpoints**: Standard `/health` and `/info` endpoints for monitoring
+- **Security Hardened**: Runs in a scratch container as non-root user (UID 65534)
+- **Minimal Footprint**: UPX-compressed binary in scratch container for smallest possible image size
+
+## Quick Start
+
+### Prerequisites
+
+- Go 1.21+
+- Node.js (for npm scripts)
+- Podman or Docker
+
+### Run Locally (Development)
+
+```bash
+# Build and run directly with Go
+npm run build
+npm run run
+
+# Or use Go commands directly
+go build -o fetchfido .
+./fetchfido
+```
+
+The application will be available at:
+- Web UI: http://127.0.0.1:8080
+- UDP Listener: 127.0.0.1:9999
+
+### Run with Container
+
+```bash
+# Build and run container
+npm run dev
+
+# Or step by step:
+npm run container:build
+npm run container:run
+```
+
+## Sending GPS Data
+
+Send GPS coordinates to the UDP port (default: 9999):
+
+```bash
+# Using netcat (JSON format)
+echo '{"lat": 40.7128, "lon": -74.0060}' | nc -u localhost 9999
+
+# Using Python
+python test_gps.py
+
+# Comma-separated format
+echo "40.7128,-74.0060" | nc -u localhost 9999
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Web UI with GPS map and message list |
+| `/health` | GET | Health check endpoint (JSON) |
+| `/info` | GET | Service information (JSON) |
+| `/messages` | GET | All received messages as JSON |
+| `/gps-data.js` | GET | GPS data as JavaScript (template) |
+| `/static/*` | GET | Static assets (CSS, JS) |
+
+## Configuration
+
+Environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | HTTP/HTTPS server port |
+| `LISTEN_PORT` | `9999` | UDP listener port |
+| `LISTEN_IP` | `127.0.0.1` | Bind address for all listeners |
+| `APP_VERSION` | `1.0.0` | Application version |
+| `APP_ENV` | `development` | Environment name |
+| `TLS_CERT_FILE` | - | Path to TLS certificate (enables HTTPS) |
+| `TLS_KEY_FILE` | - | Path to TLS private key (enables HTTPS) |
+
+## TLS/HTTPS Support
+
+FetchFido supports TLS 1.3 for secure communication. See [TLS.md](TLS.md) for detailed configuration.
+
+### Quick TLS Setup
+
+```bash
+# Generate self-signed certificate (testing only)
+mkdir -p ./certs
+openssl req -x509 -newkey rsa:4096 -keyout ./certs/privkey.pem \
+  -out ./certs/fullchain.pem -days 365 -nodes -subj "/CN=localhost"
+
+# Run with TLS
+npm run container:run-tls
+```
+
+For production, use Let's Encrypt certificates. See [TLS.md](TLS.md) for instructions.
+
+## Container Commands
+
+### Basic Operations
+```bash
+npm run container:build          # Build container image
+npm run container:run            # Run without TLS
+npm run container:run-detached   # Run in background (HTTP)
+npm run container:stop           # Stop running container
+npm run container:clean          # Remove container
+```
+
+### TLS Operations
+```bash
+npm run container:run-tls              # Run with TLS
+npm run container:run-tls-detached     # Run with TLS in background
+```
+
+### Kubernetes
+```bash
+npm run k8s:deploy               # Deploy to Kubernetes
+npm run k8s:delete               # Remove from Kubernetes
+```
+
+## Project Structure
+
+```
+FetchFido/
+├── main.go                 # Main application code
+├── go.mod                  # Go module definition
+├── Dockerfile              # Multi-stage container build
+├── package.json            # npm scripts for convenience
+├── TLS.md                  # TLS configuration guide
+├── templates/
+│   ├── index.html          # Main web UI template
+│   └── gps-data.js         # GPS data JavaScript template
+├── static/
+│   ├── css/
+│   │   └── style.css       # Application styles
+│   └── js/
+│       └── app.js          # Client-side JavaScript
+└── test_gps.py             # GPS testing utility
+```
+
+## Security Features
+
+- **Non-root User**: Container runs as UID/GID 65534
+- **Scratch Base**: Minimal attack surface using scratch container
+- **TLS 1.3 Only**: When TLS is enabled, only TLS 1.3 is accepted
+- **Static Binary**: Fully static binary with no external dependencies
+- **UPX Compression**: Binary compressed for minimal size
+- **Read-only Mounts**: TLS certificates mounted read-only
+
+## Development
+
+### Testing GPS Functionality
+
+```bash
+# Basic GPS test
+python test_gps.py
+
+# Manual GPS testing
+python test_manual_gps.py
+
+# Verify GPS parsing
+python verify_fix.py
+```
+
+### Building
+
+```bash
+# Build Go binary
+go build -o fetchfido .
+
+# Build optimized binary (like Docker build)
+CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+  -ldflags '-extldflags "-static" -w -s' -trimpath -o fetchfido .
+```
+
+## Technology Stack
+
+- **Backend**: Go 1.21+
+- **Frontend**: HTML5, JavaScript, Leaflet.js 1.9.4
+- **Container**: Podman/Docker (scratch-based)
+- **Protocols**: HTTP/HTTPS, UDP
+
+## License
+
+See project repository for license information.
+
+## Contributing
+
+This project is designed for learning Podman/Kubernetes deployment. Contributions welcome!

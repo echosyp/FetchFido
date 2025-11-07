@@ -1,0 +1,83 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 40px;
+}
+
+.header {
+    background: #2c3e50;
+    color: white;
+    padding: 20px;
+    border-radius: 5px;
+}
+
+.messages {
+    margin-top: 20px;
+}
+
+.message {
+    background: #f8f9fa;
+    border-left: 4px solid #007bff;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+
+.timestamp {
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.source {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.no-data {
+    color: #dc3545;
+    font-style: italic;
+}
+
+.refresh {
+    margin: 20px 0;
+}
+
+.refresh button {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 10px;
+}
+
+.refresh button.enabled {
+    background: #28a745;
+}
+
+.refresh button.disabled {
+    background: #dc3545;
+}
+
+.refresh button:hover {
+    opacity: 0.8;
+}
+
+.map-container {
+    margin: 20px 0;
+}
+
+#map {
+    height: 400px !important;
+    width: 100% !important;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    min-height: 400px;
+    background-color: #f0f0f0;
+}
+
+.coordinates {
+    color: #17a2b8;
+    font-weight: bold;
+    margin-top: 5px;
+}

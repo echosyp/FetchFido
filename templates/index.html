@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>FetchFido - Data Receiver</title>
+    <link rel="stylesheet" type="text/css" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+</head>
+<body>
+    <div class="header">
+        <h1>FetchFido - Data Receiver</h1>
+        <p>Listening on UDP port {{.ListenPort}} | Web port {{.WebPort}}</p>
+    </div>
+
+    <div class="refresh">
+        <button onclick="location.reload()">Refresh</button>
+        <button id="auto-refresh-toggle" class="enabled" onclick="toggleAutoRefresh()">Disable Auto-refresh</button>
+        <span id="auto-refresh-status" style="margin-left: 10px; color: #6c757d;">Auto-refresh in 10 seconds</span>
+    </div>
+
+    <div class="map-container">
+        <h2>GPS Location Map</h2>
+        <div id="map"></div>
+    </div>
+
+    <div class="messages">
+        <h2>Received Messages ({{.MessageCount}})</h2>
+        {{if .Messages}}
+            {{range .Messages}}
+            <div class="message">
+                <div class="timestamp">{{.Timestamp.Format "2006-01-02 15:04:05"}}</div>
+                <div class="source">From: {{.Source}}</div>
+                <div><strong>Data:</strong> {{.Data}}</div>
+                {{if .Coordinates.Valid}}
+                <div class="coordinates">GPS: {{.Coordinates.Latitude}}, {{.Coordinates.Longitude}}</div>
+                {{end}}
+            </div>
+            {{end}}
+        {{else}}
+            <div class="no-data">No messages received yet. Send data to UDP port {{.ListenPort}}.</div>
+        {{end}}
+    </div>
+
+    <script src="gps-data.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

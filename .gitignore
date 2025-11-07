@@ -1,0 +1,4 @@
+.claude/
+.idea
+test_manual_gps.py
+verify_fix.py

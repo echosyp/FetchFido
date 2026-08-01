@@ -1,13 +1,16 @@
 body {
     font-family: Arial, sans-serif;
     margin: 40px;
+    background: #1C1D23;
+    color: #e6edf3;
 }
 
 .header {
-    background: #2c3e50;
-    color: white;
+    background: #161b22;
+    color: #e6edf3;
     padding: 20px;
     border-radius: 5px;
+    border: 1px solid #30363d;
 }
 
 .messages {
@@ -15,25 +18,27 @@ body {
 }
 
 .message {
-    background: #f8f9fa;
-    border-left: 4px solid #007bff;
+    background: #161b22;
+    border-left: 4px solid #58a6ff;
     padding: 15px;
     margin: 10px 0;
     border-radius: 4px;
+    border: 1px solid #30363d;
+    color: #e6edf3;
 }
 
 .timestamp {
-    color: #6c757d;
+    color: #8b949e;
     font-size: 0.9em;
 }
 
 .source {
-    color: #28a745;
+    color: #3fb950;
     font-weight: bold;
 }
 
 .no-data {
-    color: #dc3545;
+    color: #f85149;
     font-style: italic;
 }
 
@@ -42,8 +47,8 @@ body {
 }
 
 .refresh button {
-    background: #007bff;
-    color: white;
+    background: #1f6feb;
+    color: #ffffff;
     border: none;
     padding: 10px 20px;
     border-radius: 4px;
@@ -52,15 +57,15 @@ body {
 }
 
 .refresh button.enabled {
-    background: #28a745;
+    background: #238636;
 }
 
 .refresh button.disabled {
-    background: #dc3545;
+    background: #da3633;
 }
 
 .refresh button:hover {
-    opacity: 0.8;
+    opacity: 0.85;
 }
 
 .map-container {
@@ -70,14 +75,14 @@ body {
 #map {
     height: 400px !important;
     width: 100% !important;
-    border: 1px solid #ddd;
+    border: 1px solid #30363d;
     border-radius: 4px;
     min-height: 400px;
-    background-color: #f0f0f0;
+    background-color: #161b22;
 }
 
 .coordinates {
-    color: #17a2b8;
+    color: #79c0ff;
     font-weight: bold;
     margin-top: 5px;
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/csv"
 	"encoding/json"
 	htmltemplate "html/template"
 	"log"
@@ -93,11 +94,17 @@ func parseGPSCoordinates(data string) GPSCoordinate {
 	return coords
 }
 
-func (ds *DataStore) AddMessage(data, source string) {
+// AddMessage stores data only if it parses as GPS coordinates, and reports
+// whether it was stored. Unparseable traffic is dropped so that broadcast
+// noise on a shared network cannot evict real coordinates from the buffer.
+func (ds *DataStore) AddMessage(data, source string) bool {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
 	coordinates := parseGPSCoordinates(data)
+	if !coordinates.Valid {
+		return false
+	}
 
 	msg := ReceivedMessage{
 		Timestamp:   time.Now(),
@@ -111,6 +118,8 @@ func (ds *DataStore) AddMessage(data, source string) {
 	if len(ds.messages) > ds.maxSize {
 		ds.messages = ds.messages[1:]
 	}
+
+	return true
 }
 
 func (ds *DataStore) GetMessages() []ReceivedMessage {
@@ -205,6 +214,48 @@ func gpsDataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func exportCSVHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=fetchfido_export.csv")
+
+	messages := dataStore.GetMessages()
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Write CSV header
+	err := writer.Write([]string{"Timestamp", "Source", "Data", "Latitude", "Longitude", "GPS Valid"})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Write data rows
+	for _, msg := range messages {
+		lat := ""
+		lon := ""
+		valid := "false"
+
+		if msg.Coordinates.Valid {
+			lat = strconv.FormatFloat(msg.Coordinates.Latitude, 'f', -1, 64)
+			lon = strconv.FormatFloat(msg.Coordinates.Longitude, 'f', -1, 64)
+			valid = "true"
+		}
+
+		err := writer.Write([]string{
+			msg.Timestamp.Format("2006-01-02 15:04:05"),
+			msg.Source,
+			msg.Data,
+			lat,
+			lon,
+			valid,
+		})
+		if err != nil {
+			log.Printf("Error writing CSV row: %v", err)
+		}
+	}
+}
+
 func udpListener() {
 	listenIP := getEnv("LISTEN_IP", "127.0.0.1")
 	listenPort := getEnv("LISTEN_PORT", "9999")
@@ -232,8 +283,14 @@ func udpListener() {
 		message := string(buffer[:n])
 		source := clientAddr.String()
 
+		if !dataStore.AddMessage(message, source) {
+			// Log the size only: dropped traffic is frequently binary and
+			// would otherwise write control bytes straight to the terminal.
+			log.Printf("Ignored non-GPS message from %s (%d bytes)", source, n)
+			continue
+		}
+
 		log.Printf("Received UDP message from %s: %s", source, message)
-		dataStore.AddMessage(message, source)
 	}
 }
 
@@ -272,6 +329,7 @@ func main() {
 	http.HandleFunc("/info", infoHandler)
 	http.HandleFunc("/messages", messagesHandler)
 	http.HandleFunc("/gps-data.js", gpsDataHandler)
+	http.HandleFunc("/export/csv", exportCSVHandler)
 
 	server := &http.Server{
 		Addr: listenIP + ":" + port,

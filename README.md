@@ -4,7 +4,7 @@ A security-hardened Go web service for receiving and visualizing GPS data over U
 
 ## Features
 
-- **UDP Data Reception**: Listens for GPS coordinates and arbitrary data over UDP
+- **UDP Data Reception**: Listens for GPS coordinates over UDP. Data that does not parse as coordinates is logged and dropped, so unrelated broadcast traffic on a shared network cannot evict real positions from the buffer.
 - **Real-time GPS Visualization**: Interactive map powered by Leaflet.js displaying GPS locations
 - **Multiple GPS Format Support**:
   - JSON format: `{"lat": 40.7128, "lon": -74.0060}`
@@ -16,7 +16,7 @@ A security-hardened Go web service for receiving and visualizing GPS data over U
 - **Minimal Footprint**: UPX-compressed binary in scratch container for smallest possible image size
 
 ## Quick Start
-
+`CONTAINER_HOST="ssh://echosyp@10.10.120.11:22/run/user/1000/podman/podman.sock" podman build Dckerfile `
 ### Prerequisites
 
 - Go 1.21+
@@ -195,7 +195,7 @@ CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
 
 ## License
 
-See project repository for license information.
+MIT — see [LICENSE](LICENSE).
 
 ## Contributing
 

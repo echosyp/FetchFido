@@ -1,0 +1,7 @@
+# Vendored third-party files must survive round-tripping through git
+# byte-for-byte, or the SHA-256 hashes recorded in web/vendor/VENDOR.md stop
+# verifying. Disable all line-ending normalisation for them.
+web/vendor/** -text
+
+# The compiled binary is tracked; never treat it as text.
+fetchfido binary

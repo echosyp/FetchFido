@@ -1,0 +1,217 @@
+// @ts-check
+/**
+ * FetchFido PWA -- application wiring.
+ *
+ * Phase 1 scope (docs/DESIGN.md section 10): BLE source, offline store, live
+ * map with breadcrumbs, position age, distance and bearing. No server, no
+ * auth, no geofence.
+ */
+
+import { BleSource } from './sources/ble.js';
+import * as store from './store.js';
+import { TrackMap } from './map.js';
+import { distance, bearing, compass, formatDistance, freshness, colourFor } from './geo.js';
+
+/** @typedef {import('./meshtastic.js').Position} Position */
+
+/** @type {Map<string, Position[]>} */
+const tracks = new Map();
+
+/** @type {{lat: number, lon: number}|null} */
+let handler = null;
+
+/** Field-test counters (docs/DESIGN.md section 11). */
+const stats = { received: 0, stored: 0, duplicates: 0 };
+
+/** @type {TrackMap} */
+let map;
+
+const source = new BleSource();
+
+function el(id) {
+  const e = document.getElementById(id);
+  if (!e) throw new Error('missing element #' + id);
+  return e;
+}
+
+async function boot() {
+  map = new TrackMap('map');
+  map.refresh();
+
+  await restore();
+
+  source.onStatus((s, detail) => {
+    const badge = el('status');
+    badge.textContent = detail ? `${s} — ${detail}` : s;
+    badge.className = 'status ' + s;
+    const btn = /** @type {HTMLButtonElement} */ (el('connect'));
+    btn.textContent = s === 'connected' ? 'Disconnect' : 'Connect radio';
+    btn.disabled = s === 'connecting';
+  });
+
+  source.onPosition(onPosition);
+
+  el('connect').addEventListener('click', async () => {
+    try {
+      if (source.status() === 'connected') await source.disconnect();
+      else await source.connect();
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
+  el('fit').addEventListener('click', () => map.fitAll());
+  el('export').addEventListener('click', exportCsv);
+  el('clear').addEventListener('click', async () => {
+    if (!confirm('Clear all stored positions for this session?')) return;
+    await store.clear();
+    tracks.clear();
+    location.reload();
+  });
+
+  if (!source.available()) {
+    el('status').textContent = 'Bluetooth unavailable — iOS needs the WiFi transport';
+    el('status').className = 'status offline';
+    /** @type {HTMLButtonElement} */ (el('connect')).disabled = true;
+  }
+
+  watchHandler();
+  registerServiceWorker();
+  setInterval(render, 1000); // ages must tick even with no new packets
+  render();
+}
+
+/** Registered here rather than inline in the HTML, which the CSP forbids. */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('sw.js').catch((err) => {
+    // Not fatal: the app still works, it just will not survive going offline.
+    console.warn('service worker registration failed', err);
+  });
+}
+
+/** Reload any positions already held from a previous session. */
+async function restore() {
+  const ids = await store.devices();
+  for (const id of ids) {
+    tracks.set(id, await store.track(id));
+  }
+}
+
+/** @param {Position} p */
+async function onPosition(p) {
+  stats.received++;
+  const isNew = await store.putPosition(p);
+  if (!isNew) {
+    // Same packet arriving by another mesh path. Expected, and a useful
+    // measure of relay redundancy during a range test.
+    stats.duplicates++;
+    return;
+  }
+  stats.stored++;
+
+  const list = tracks.get(p.deviceId) || [];
+  list.push(p);
+  list.sort((a, b) => a.ts - b.ts);
+  tracks.set(p.deviceId, list);
+  render();
+}
+
+/** Handler's own position, for distance and bearing to each dog. */
+function watchHandler() {
+  if (!('geolocation' in navigator)) return;
+  navigator.geolocation.watchPosition(
+    (pos) => {
+      handler = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      map.setHandler(handler.lat, handler.lon);
+      render();
+    },
+    (err) => console.warn('geolocation', err.message),
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+  );
+}
+
+function render() {
+  const now = Date.now() / 1000;
+  const panel = el('dogs');
+  panel.innerHTML = '';
+
+  const ids = [...tracks.keys()].sort();
+  if (ids.length === 0) {
+    panel.innerHTML = '<p class="empty">No positions yet. Connect a radio and wait for a node to report.</p>';
+  }
+
+  for (const id of ids) {
+    const list = tracks.get(id) || [];
+    if (list.length === 0) continue;
+    const latest = list[list.length - 1];
+    const age = now - latest.ts;
+    const fresh = freshness(age);
+
+    map.update(id, list, fresh.level);
+
+    let range = '';
+    if (handler) {
+      const d = distance(handler.lat, handler.lon, latest.lat, latest.lon);
+      const b = bearing(handler.lat, handler.lon, latest.lat, latest.lon);
+      range = `<div class="range">${formatDistance(d)} · ${compass(b)} ${Math.round(b)}&deg;</div>`;
+    }
+
+    const radio = [
+      latest.rssi !== null ? `RSSI ${latest.rssi}` : null,
+      latest.snr !== null ? `SNR ${latest.snr.toFixed(1)}` : null,
+      latest.hops !== null ? (latest.hops === 0 ? 'direct' : `${latest.hops} hop${latest.hops > 1 ? 's' : ''}`) : null,
+      latest.sats !== null ? `${latest.sats} sats` : null,
+    ].filter(Boolean).join(' · ');
+
+    const card = document.createElement('div');
+    card.className = 'dog ' + fresh.level;
+    card.style.borderLeftColor = colourFor(id);
+    card.innerHTML = `
+      <div class="dog-head">
+        <span class="dog-id">${id}</span>
+        <span class="age ${fresh.level}">${fresh.label}</span>
+      </div>
+      ${range}
+      <div class="coords">${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}</div>
+      <div class="radio">${radio || '&nbsp;'}</div>
+      <div class="fixes">${list.length} fixes</div>
+    `;
+    panel.appendChild(card);
+  }
+
+  el('stats').textContent =
+    `${stats.received} received · ${stats.stored} stored · ${stats.duplicates} dup`;
+}
+
+/**
+ * Export the session including RSSI, SNR and hop count.
+ *
+ * These columns are the point: packet delivery against distance is the curve
+ * that decides preset defaults and whether mesh-only is viable at all
+ * (docs/DESIGN.md section 11).
+ */
+async function exportCsv() {
+  const rows = await store.allPositions();
+  const header = 'device_id,timestamp_utc,lat,lon,alt_m,speed,heading,sats,rssi_dbm,snr_db,hops,link';
+  const body = rows.map((p) => [
+    p.deviceId,
+    new Date(p.ts * 1000).toISOString(),
+    p.lat, p.lon,
+    p.alt ?? '', p.speed ?? '', p.heading ?? '', p.sats ?? '',
+    p.rssi ?? '', p.snr ?? '', p.hops ?? '', p.link,
+  ].join(','));
+
+  const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `fetchfido-session-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+boot().catch((err) => {
+  console.error(err);
+  document.body.insertAdjacentHTML('afterbegin',
+    `<div class="fatal">Startup failed: ${err instanceof Error ? err.message : String(err)}</div>`);
+});

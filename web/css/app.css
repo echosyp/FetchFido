@@ -1,0 +1,149 @@
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #1f6feb;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  /* Respect notches; this runs fullscreen when installed. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.bar h1 { font-size: 17px; margin: 0; }
+
+.status {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45vw;
+}
+.status.connected { color: var(--ok); border-color: var(--ok); }
+.status.connecting { color: var(--warn); border-color: var(--warn); }
+.status.degraded { color: var(--warn); border-color: var(--warn); }
+.status.offline { color: var(--muted); }
+
+.stats { margin-left: auto; font-size: 12px; color: var(--muted); }
+
+.controls {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  /* Large enough to hit with gloves on. */
+  padding: 10px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+button.danger { background: #6e2b28; }
+
+main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+#map {
+  flex: 1;
+  min-height: 0;
+  background: var(--panel);
+}
+
+.dogs {
+  width: 300px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.empty { color: var(--muted); font-size: 13px; }
+
+.dog {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #0d1117;
+}
+.dog.stale { opacity: 0.85; }
+.dog.lost { opacity: 0.6; }
+
+.dog-head { display: flex; justify-content: space-between; align-items: baseline; }
+.dog-id { font-weight: 600; font-family: ui-monospace, monospace; font-size: 13px; }
+
+.age { font-size: 12px; }
+.age.fresh { color: var(--ok); }
+.age.stale { color: var(--warn); }
+.age.lost { color: var(--bad); }
+
+/* The number people actually read in the field. */
+.range { font-size: 22px; font-weight: 600; margin: 6px 0 2px; }
+
+.coords { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+.radio { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.fixes { font-size: 11px; color: var(--muted); }
+
+.fatal {
+  background: var(--bad);
+  color: #fff;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+/* Stack on phones -- the map keeps the majority of the screen. */
+@media (max-width: 720px) {
+  main { flex-direction: column; }
+  #map { flex: 1 1 60%; }
+  .dogs {
+    width: 100%;
+    flex: 1 1 40%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}

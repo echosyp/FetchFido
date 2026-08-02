@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FetchFido</title>
+
+<!--
+  Strict CSP. Everything except map tiles is same-origin: no CDN, no inline
+  script, no eval. Leaflet is vendored (web/vendor/VENDOR.md).
+  'unsafe-inline' is permitted for style only because Leaflet sets inline
+  styles on its own layer elements at runtime.
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data: https://tile.openstreetmap.org;
+  connect-src 'self';
+  object-src 'none';
+  base-uri 'none';
+  form-action 'none';
+  frame-ancestors 'none'">
+
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="bar">
+  <h1>FetchFido</h1>
+  <span id="status" class="status offline">offline</span>
+  <span id="stats" class="stats"></span>
+</header>
+
+<div class="controls">
+  <button id="connect">Connect radio</button>
+  <button id="fit">Fit all</button>
+  <button id="export">Export CSV</button>
+  <button id="clear" class="danger">Clear</button>
+</div>
+
+<main>
+  <div id="map"></div>
+  <aside id="dogs" class="dogs"></aside>
+</main>
+
+<script src="vendor/leaflet.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

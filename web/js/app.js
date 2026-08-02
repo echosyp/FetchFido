@@ -10,7 +10,7 @@
 import { BleSource } from './sources/ble.js';
 import { WifiSource } from './sources/wifi.js';
 import * as store from './store.js';
-import { diag } from './meshtastic.js';
+import { diag, labelFor, nodeNames } from './meshtastic.js';
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, freshness, colourFor } from './geo.js';
 
@@ -226,12 +226,24 @@ function noteHandlerUnavailable(msg) {
   el('geo').textContent = msg;
 }
 
+/**
+ * Escape text taken from the mesh. Node names are attacker-controlled: anyone
+ * on the channel can set their own long name, and it is rendered into the DOM.
+ * @param {string} v
+ */
+function esc(v) {
+  return String(v).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
+}
+
 function render() {
   const now = Date.now() / 1000;
   const panel = el('dogs');
   panel.innerHTML = '';
 
-  const ids = [...tracks.keys()].sort();
+  // Sort by display label so the list reads naturally, not by hex id.
+  const ids = [...tracks.keys()].sort((a, b) =>
+    labelFor(a).localeCompare(labelFor(b), undefined, { sensitivity: 'base' }));
   if (ids.length === 0) {
     panel.innerHTML = '<p class="empty">No positions yet. Connect a radio and wait for a node to report.</p>';
   }
@@ -262,11 +274,13 @@ function render() {
     const card = document.createElement('div');
     card.className = 'dog ' + fresh.level;
     card.style.borderLeftColor = colourFor(id);
+    const named = nodeNames.get(id);
     card.innerHTML = `
       <div class="dog-head">
-        <span class="dog-id">${id}</span>
+        <span class="dog-name">${esc(labelFor(id))}</span>
         <span class="age ${fresh.level}">${fresh.label}</span>
       </div>
+      <div class="dog-id">${named?.short ? esc(named.short) + ' · ' : ''}${id}</div>
       ${range}
       <div class="coords">${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}</div>
       <div class="radio">${radio || '&nbsp;'}</div>

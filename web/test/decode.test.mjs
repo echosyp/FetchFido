@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { decodeFromRadio, decodeFrames, nodeId } from '../js/meshtastic.js';
+import { decodeFromRadio, decodeFrames, nodeId, nodeNames, labelFor } from '../js/meshtastic.js';
 import { Reader } from '../js/protobuf.js';
 
 // ---- minimal protobuf encoder, test-only -----------------------------------
@@ -212,6 +212,73 @@ test('tolerates a body with no positions at all', () => {
     ...tag(7, 0), ...varint(42),                    // config_complete_id
   ]);
   assert.deepEqual(decodeFrames(body), []);
+});
+
+console.log('node names');
+
+const str = (s) => [...Buffer.from(s, 'utf8')];
+
+/** A User message. */
+function buildUser({ id, long, short }) {
+  return [
+    ...(id ? lenField(1, str(id)) : []),
+    ...lenField(2, str(long)),
+    ...lenField(3, str(short)),
+  ];
+}
+
+test('harvests names from the NodeInfo handshake batch', () => {
+  const nodeInfo = [
+    ...tag(1, 0), ...varint(0xa1b2c3d4),
+    ...lenField(2, buildUser({ id: '!a1b2c3d4', long: 'Fido Collar 1', short: 'FID1' })),
+  ];
+  decodeFrames(new Uint8Array(lenField(4, nodeInfo)));
+  assert.deepEqual(nodeNames.get('!a1b2c3d4'), { long: 'Fido Collar 1', short: 'FID1' });
+  assert.equal(labelFor('!a1b2c3d4'), 'Fido Collar 1');
+});
+
+test('harvests names from live NODEINFO_APP packets', () => {
+  const frame = buildFrame({
+    ...REF,
+    portnum: 4,
+    position: buildUser({ id: '!22f94fec', long: 'Solar Repeater', short: 'SOLR' }),
+  });
+  decodeFrames(frame);
+  assert.equal(labelFor('!22f94fec'), 'Solar Repeater');
+});
+
+test('falls back to the node id when no name is known', () => {
+  assert.equal(labelFor('!deadbeef'), '!deadbeef');
+});
+
+test('falls back to short name when long is empty', () => {
+  const nodeInfo = [
+    ...tag(1, 0), ...varint(0x55667788),
+    ...lenField(2, buildUser({ id: '!55667788', long: '', short: 'ONLY' })),
+  ];
+  decodeFrames(new Uint8Array(lenField(4, nodeInfo)));
+  assert.equal(labelFor('!55667788'), 'ONLY');
+});
+
+test('preserves non-ascii names', () => {
+  const nodeInfo = [
+    ...tag(1, 0), ...varint(0x99887766),
+    ...lenField(2, buildUser({ id: '!99887766', long: 'Hündin ✓', short: 'HUN' })),
+  ];
+  decodeFrames(new Uint8Array(lenField(4, nodeInfo)));
+  assert.equal(labelFor('!99887766'), 'Hündin ✓');
+});
+
+test('a hostile name is stored raw, for the UI to escape', () => {
+  // Anyone on the channel can set their own long name, so it reaches the DOM
+  // as untrusted input. The decoder must not mangle it; the UI must escape it.
+  const evil = '<img src=x onerror=alert(1)>';
+  const nodeInfo = [
+    ...tag(1, 0), ...varint(0x0badf00d),
+    ...lenField(2, buildUser({ id: '!0badf00d', long: evil, short: 'EVIL' })),
+  ];
+  decodeFrames(new Uint8Array(lenField(4, nodeInfo)));
+  assert.equal(labelFor('!0badf00d'), evil);
 });
 
 test('nodeId formats unsigned', () => {

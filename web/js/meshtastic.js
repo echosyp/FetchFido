@@ -31,12 +31,27 @@ export const BLE = {
 
 export const PORTNUM = {
   POSITION_APP: 3,
+  NODEINFO_APP: 4,
 };
 
 /** FromRadio field numbers. */
 const FROM_RADIO = {
   PACKET: 2,
+  NODE_INFO: 4,
   CONFIG_COMPLETE_ID: 7,
+};
+
+/** NodeInfo field numbers. */
+const NODE_INFO = {
+  NUM: 1,
+  USER: 2,
+};
+
+/** User field numbers. */
+const USER = {
+  ID: 1,
+  LONG_NAME: 2,
+  SHORT_NAME: 3,
 };
 
 /** MeshPacket field numbers. */
@@ -126,6 +141,81 @@ function hex(b) {
   return Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * @typedef {object} NodeName
+ * @property {string} long   e.g. "Fido Collar 1"
+ * @property {string} short  e.g. "FID1"
+ */
+
+/**
+ * Friendly names, keyed by node ID ("!9ea0eaac").
+ *
+ * Populated from two sources: the NodeInfo batch the radio sends during the
+ * config handshake, and live NODEINFO_APP packets. Node IDs remain the stable
+ * key everywhere -- names are display sugar and can change or be absent.
+ * @type {Map<string, NodeName>}
+ */
+export const nodeNames = new Map();
+
+const utf8 = new TextDecoder();
+
+/**
+ * Best available label for a node: long name, else short name, else the ID.
+ * @param {string} deviceId
+ * @returns {string}
+ */
+export function labelFor(deviceId) {
+  const n = nodeNames.get(deviceId);
+  return n?.long || n?.short || deviceId;
+}
+
+/**
+ * Parse a User message and record its names.
+ * @param {Uint8Array} buf
+ * @param {string} [fallbackId] used when the message carries no id of its own
+ */
+function readUser(buf, fallbackId) {
+  /** @type {string|null} */ let id = null;
+  let long = '';
+  let short = '';
+
+  new Reader(buf).each((field, wire, r) => {
+    if (wire !== WIRE.LEN) return false;
+    switch (field) {
+      case USER.ID: id = utf8.decode(r.bytes()); return true;
+      case USER.LONG_NAME: long = utf8.decode(r.bytes()); return true;
+      case USER.SHORT_NAME: short = utf8.decode(r.bytes()); return true;
+      default: return false;
+    }
+  });
+
+  const key = id || fallbackId;
+  if (key && (long || short)) nodeNames.set(key, { long, short });
+}
+
+/**
+ * Parse a NodeInfo message from the config handshake.
+ * @param {Uint8Array} buf
+ */
+function readNodeInfo(buf) {
+  let num = 0;
+  /** @type {Uint8Array|null} */ let user = null;
+
+  new Reader(buf).each((field, wire, r) => {
+    if (field === NODE_INFO.NUM) {
+      num = wire === WIRE.I32 ? r.u32() : r.varint();
+      return true;
+    }
+    if (field === NODE_INFO.USER && wire === WIRE.LEN) {
+      user = r.bytes();
+      return true;
+    }
+    return false;
+  });
+
+  if (user) readUser(user, num ? nodeId(num) : undefined);
+}
+
 export function resetDiag() {
   diag.bodies = 0;
   diag.packets = 0;
@@ -158,6 +248,16 @@ export function decodeFrames(body) {
   new Reader(body).each((field, wire, r) => {
     if (field === FROM_RADIO.PACKET && wire === WIRE.LEN) {
       packets.push(r.bytes());
+      return true;
+    }
+    // The handshake delivers the node database; harvest names from it so
+    // devices are labelled before they ever report a position.
+    if (field === FROM_RADIO.NODE_INFO && wire === WIRE.LEN) {
+      try {
+        readNodeInfo(r.bytes());
+      } catch (err) {
+        console.warn('node info decode failed', err);
+      }
       return true;
     }
     return false;
@@ -241,6 +341,18 @@ function decodeMeshPacket(buf) {
 
   const { portnum, payload } = decodeData(decoded);
   if (portnum >= 0) diag.portnums.set(portnum, (diag.portnums.get(portnum) || 0) + 1);
+
+  // Live name announcements: a node renaming itself, or one that joined after
+  // the handshake and so was absent from the node database.
+  if (portnum === PORTNUM.NODEINFO_APP && payload) {
+    try {
+      readUser(payload, nodeId(from));
+    } catch (err) {
+      console.warn('user decode failed', err);
+    }
+    return null;
+  }
+
   if (portnum !== PORTNUM.POSITION_APP || !payload) return null;
 
   const pos = decodePosition(payload);

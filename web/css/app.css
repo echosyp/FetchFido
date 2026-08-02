@@ -126,7 +126,8 @@ main {
 .dog.lost { opacity: 0.6; }
 
 .dog-head { display: flex; justify-content: space-between; align-items: baseline; }
-.dog-id { font-weight: 600; font-family: ui-monospace, monospace; font-size: 13px; }
+.dog-name { font-weight: 600; font-size: 15px; }
+.dog-id { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
 
 .age { font-size: 12px; }
 .age.fresh { color: var(--ok); }

@@ -8,12 +8,23 @@
  */
 
 import { colourFor } from './geo.js';
+import { labelFor } from './meshtastic.js';
 
 /** @typedef {import('./meshtastic.js').Position} Position */
 
 // Leaflet attaches itself to window; there are no type definitions without a
 // package manager, so it is deliberately untyped here.
 const L = /** @type {any} */ (/** @type {any} */ (globalThis).L);
+
+/**
+ * Names come off the mesh and are attacker-controlled; Leaflet popups take
+ * raw HTML.
+ * @param {string} v
+ */
+function escapeHtml(v) {
+  return String(v).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
+}
 
 export class TrackMap {
   /** @param {string} elementId */
@@ -96,7 +107,8 @@ export class TrackMap {
       marker.setStyle({ fillOpacity: opacity });
     }
     marker.bindPopup(
-      `<b>${deviceId}</b><br>${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}` +
+      `<b>${escapeHtml(labelFor(deviceId))}</b><br><small>${deviceId}</small>` +
+      `<br>${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}` +
       `<br>${positions.length} fixes` +
       (latest.rssi !== null ? `<br>RSSI ${latest.rssi} dBm` : '') +
       (latest.snr !== null ? ` · SNR ${latest.snr.toFixed(1)}` : '')

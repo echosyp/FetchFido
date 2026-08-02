@@ -314,6 +314,25 @@ The question to answer: at what distance, at 40 cm off the ground, in timber,
 does packet delivery fall below usable? That single curve drives preset defaults,
 cadence, and whether mesh-only is viable at all.
 
+## 11a. Collars versus infrastructure
+
+Field testing surfaced a gap not anticipated in section 10: **every
+position-reporting node on the mesh renders as a tracked dog.** A stationary
+solar-powered repeater with a GPS is indistinguishable, in the UI, from a
+collar — and on a community mesh so is every stranger's node.
+
+This is what device claiming (PRD section 8.1) exists to solve, and it is
+needed earlier than the Phase 2 placement suggests. Until then the map is
+usable only on a private mesh with known nodes.
+
+Minimum viable fix, ahead of full claiming: a local allowlist of node IDs the
+user marks as collars, everything else hidden or shown as infrastructure.
+Cheap, entirely client-side, and it makes the app usable on a shared mesh.
+
+Note the distinction is genuinely useful rather than merely cosmetic: a
+stationary node with a known fixed position is a **reference beacon**. Its
+delivery ratio measures the mesh independently of any dog's movement.
+
 ## 12. Open technical questions
 
 1. Does stock Meshtastic smart-broadcast give adequate adaptive cadence, or is

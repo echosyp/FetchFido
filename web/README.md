@@ -27,7 +27,9 @@ css/app.css
 js/protobuf.js      minimal protobuf wire-format reader
 js/meshtastic.js    FromRadio -> MeshPacket -> Data -> Position
 js/sources/types.js CollarSource contract
+js/sources/base.js  shared listener plumbing
 js/sources/ble.js   Web Bluetooth transport
+js/sources/wifi.js  HTTP transport (the only one iOS can use)
 js/store.js         IndexedDB, deduped on [deviceId, ts]
 js/geo.js           distance, bearing, freshness
 js/map.js           Leaflet wrapper
@@ -57,13 +59,34 @@ is *not* a secure context and the Connect button will fail:
 - Or serve over https with a certificate — the Go binary already supports TLS
   (`TLS_CERT_FILE` / `TLS_KEY_FILE`), and a self-signed cert is enough.
 
-iOS has no Web Bluetooth at all. The WiFi and server transports are what will
-serve iPhones; neither is built yet.
+### WiFi transport
+
+Pick **WiFi** in the transport dropdown and enter the node's address
+(`192.168.1.50`, or `node.lan`). The scheme is optional; `http://` is assumed.
+
+This needs no secure context, so it works from a phone over plain http on the
+LAN — which is exactly why it is the transport that serves iOS.
+
+Two things will block it, and the status badge names both:
+
+- **Mixed content.** A node speaking http cannot be reached from a page served
+  over https. Serve the PWA over http when using WiFi. This is the opposite of
+  what Bluetooth requires, so the two transports pull in different directions
+  during development.
+- **CORS.** The node must return permissive CORS headers for a cross-origin
+  browser to talk to it. Serving this app *from the node itself* sidesteps the
+  question entirely. [verify against firmware]
+
+Note `connect-src` in the CSP is relaxed to `http: https:` for this feature —
+the node address is arbitrary and CSP cannot express "any private address".
+That is the weakest line in the policy and it is there for this transport
+alone.
 
 ## Tests
 
 ```bash
-node web/test/decode.test.mjs
+node web/test/decode.test.mjs   # protobuf reader and Meshtastic decode
+node web/test/wifi.test.mjs     # HTTP transport, with fetch stubbed
 ```
 
 These build synthetic Meshtastic frames byte by byte and assert the decoder
@@ -84,8 +107,8 @@ Walk a node away from the radio, export, and plot delivery against distance.
 
 ## Status
 
-Working: BLE transport, decode, dedupe store, map with trails, position age,
-distance and bearing, CSV export, offline shell.
+Working: BLE and WiFi transports, decode, dedupe store, map with trails,
+position age, distance and bearing, CSV export, offline shell.
 
-Not built: WiFi/serial/server transports, geofencing, device claiming, dog
+Not built: serial and server transports, geofencing, device claiming, dog
 profiles, pre-cached offline map regions, any server at all.

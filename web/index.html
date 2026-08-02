@@ -6,17 +6,22 @@
 <title>FetchFido</title>
 
 <!--
-  Strict CSP. Everything except map tiles is same-origin: no CDN, no inline
-  script, no eval. Leaflet is vendored (web/vendor/VENDOR.md).
-  'unsafe-inline' is permitted for style only because Leaflet sets inline
-  styles on its own layer elements at runtime.
+  Strict CSP. No CDN, no inline script, no eval. Leaflet is vendored
+  (web/vendor/VENDOR.md). 'unsafe-inline' is permitted for style only because
+  Leaflet sets inline styles on its own layer elements at runtime.
+
+  connect-src has to admit http: and https: because the WiFi transport talks
+  to a node at a LAN address the user types in, and CSP cannot express "any
+  private address". This is the weakest directive here and it is a deliberate
+  trade for that feature. It can be tightened back to 'self' once the server
+  exists and can proxy the node, or by anyone who only uses Bluetooth.
 -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
   script-src 'self';
   style-src 'self' 'unsafe-inline';
   img-src 'self' data: https://tile.openstreetmap.org;
-  connect-src 'self';
+  connect-src 'self' http: https:;
   object-src 'none';
   base-uri 'none';
   form-action 'none';
@@ -36,6 +41,12 @@
 </header>
 
 <div class="controls">
+  <select id="transport" aria-label="Transport">
+    <option value="ble">Bluetooth</option>
+    <option value="wifi">WiFi</option>
+  </select>
+  <input id="address" type="text" inputmode="url" autocomplete="off"
+         placeholder="192.168.1.50" aria-label="Node address" hidden>
   <button id="connect">Connect radio</button>
   <button id="fit">Fit all</button>
   <button id="export">Export CSV</button>

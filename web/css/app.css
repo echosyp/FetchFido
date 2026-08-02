@@ -80,6 +80,17 @@ button {
 button:disabled { opacity: 0.5; cursor: default; }
 button.danger { background: #6e2b28; }
 
+select, input[type="text"] {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+input[type="text"] { width: 11em; font-family: ui-monospace, monospace; }
+input[hidden] { display: none; }
+
 main {
   flex: 1;
   display: flex;

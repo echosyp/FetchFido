@@ -8,6 +8,7 @@
  */
 
 import { BleSource } from './sources/ble.js';
+import { WifiSource } from './sources/wifi.js';
 import * as store from './store.js';
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, freshness, colourFor } from './geo.js';
@@ -26,12 +27,54 @@ const stats = { received: 0, stored: 0, duplicates: 0 };
 /** @type {TrackMap} */
 let map;
 
-const source = new BleSource();
+/** @type {import('./sources/types.js').CollarSource|null} */
+let source = null;
+
+const PREFS = 'fetchfido.prefs';
 
 function el(id) {
   const e = document.getElementById(id);
   if (!e) throw new Error('missing element #' + id);
   return e;
+}
+
+/** @returns {{transport: string, address: string}} */
+function loadPrefs() {
+  try {
+    return { transport: 'ble', address: '', ...JSON.parse(localStorage.getItem(PREFS) || '{}') };
+  } catch {
+    return { transport: 'ble', address: '' };
+  }
+}
+
+/** @param {{transport: string, address: string}} p */
+function savePrefs(p) {
+  try {
+    localStorage.setItem(PREFS, JSON.stringify(p));
+  } catch {
+    // Private browsing can refuse storage; the app still runs.
+  }
+}
+
+/**
+ * Build a source for the selected transport and attach listeners.
+ * @param {string} kind
+ * @param {string} address
+ */
+function makeSource(kind, address) {
+  const s = kind === 'wifi' ? new WifiSource(address) : new BleSource();
+
+  s.onStatus((state, detail) => {
+    const badge = el('status');
+    badge.textContent = detail ? `${state} — ${detail}` : state;
+    badge.className = 'status ' + state;
+    const btn = /** @type {HTMLButtonElement} */ (el('connect'));
+    btn.textContent = state === 'connected' ? 'Disconnect' : 'Connect radio';
+    btn.disabled = state === 'connecting';
+  });
+
+  s.onPosition(onPosition);
+  return s;
 }
 
 async function boot() {
@@ -40,21 +83,54 @@ async function boot() {
 
   await restore();
 
-  source.onStatus((s, detail) => {
-    const badge = el('status');
-    badge.textContent = detail ? `${s} — ${detail}` : s;
-    badge.className = 'status ' + s;
+  const prefs = loadPrefs();
+  const transportEl = /** @type {HTMLSelectElement} */ (el('transport'));
+  const addressEl = /** @type {HTMLInputElement} */ (el('address'));
+  transportEl.value = prefs.transport;
+  addressEl.value = prefs.address;
+
+  const syncTransportUi = () => {
+    const wifi = transportEl.value === 'wifi';
+    addressEl.hidden = !wifi;
     const btn = /** @type {HTMLButtonElement} */ (el('connect'));
-    btn.textContent = s === 'connected' ? 'Disconnect' : 'Connect radio';
-    btn.disabled = s === 'connecting';
+    if (!wifi && !new BleSource().available()) {
+      el('status').textContent = 'Bluetooth unavailable — use the WiFi transport';
+      el('status').className = 'status offline';
+      btn.disabled = true;
+    } else {
+      btn.disabled = false;
+    }
+  };
+
+  transportEl.addEventListener('change', async () => {
+    if (source && source.status() !== 'offline') await source.disconnect();
+    source = null;
+    savePrefs({ transport: transportEl.value, address: addressEl.value });
+    syncTransportUi();
   });
 
-  source.onPosition(onPosition);
+  addressEl.addEventListener('change', () => {
+    // The address is baked in at construction, so a change needs a new source.
+    source = null;
+    savePrefs({ transport: transportEl.value, address: addressEl.value });
+  });
+
+  syncTransportUi();
 
   el('connect').addEventListener('click', async () => {
     try {
-      if (source.status() === 'connected') await source.disconnect();
-      else await source.connect();
+      if (source && source.status() === 'connected') {
+        await source.disconnect();
+        return;
+      }
+      if (transportEl.value === 'wifi' && !addressEl.value.trim()) {
+        el('status').textContent = 'enter the node address first';
+        el('status').className = 'status offline';
+        addressEl.focus();
+        return;
+      }
+      if (!source) source = makeSource(transportEl.value, addressEl.value.trim());
+      await source.connect();
     } catch (err) {
       console.error(err);
     }
@@ -68,12 +144,6 @@ async function boot() {
     tracks.clear();
     location.reload();
   });
-
-  if (!source.available()) {
-    el('status').textContent = 'Bluetooth unavailable — iOS needs the WiFi transport';
-    el('status').className = 'status offline';
-    /** @type {HTMLButtonElement} */ (el('connect')).disabled = true;
-  }
 
   watchHandler();
   registerServiceWorker();

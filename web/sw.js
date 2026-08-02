@@ -30,7 +30,9 @@ const SHELL_FILES = [
   './js/geo.js',
   './js/meshtastic.js',
   './js/protobuf.js',
+  './js/sources/base.js',
   './js/sources/ble.js',
+  './js/sources/wifi.js',
   './js/sources/types.js',
 ];
 

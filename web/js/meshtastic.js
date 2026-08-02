@@ -90,6 +90,46 @@ export function nodeId(num) {
 }
 
 /**
+ * Decode diagnostics.
+ *
+ * Silence is the enemy here: a position that fails to decode looks exactly
+ * like no traffic at all. These counters distinguish "nothing is arriving"
+ * from "packets arrive but are encrypted" from "positions arrive but do not
+ * parse" -- three problems with completely different fixes.
+ */
+export const diag = {
+  /** Response bodies with content. */
+  bodies: 0,
+  /** MeshPackets seen inside them. */
+  packets: 0,
+  /** Packets the radio could not decrypt for us. */
+  encrypted: 0,
+  /** portnum -> count. */
+  portnums: /** @type {Map<number, number>} */ (new Map()),
+  /** Positions successfully decoded. */
+  positions: 0,
+  /** POSITION_APP payloads that failed to yield coordinates. */
+  failures: 0,
+  /** Hex of the most recent failing position payload, for reporting. */
+  lastFailureHex: /** @type {string|null} */ (null),
+};
+
+/** @param {Uint8Array} b */
+function hex(b) {
+  return Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+export function resetDiag() {
+  diag.bodies = 0;
+  diag.packets = 0;
+  diag.encrypted = 0;
+  diag.portnums.clear();
+  diag.positions = 0;
+  diag.failures = 0;
+  diag.lastFailureHex = null;
+}
+
+/**
  * Decode a response body into every position it contains.
  *
  * A body may hold SEVERAL FromRadio messages concatenated back to back -- the
@@ -106,6 +146,8 @@ export function decodeFrames(body) {
   /** @type {Uint8Array[]} */
   const packets = [];
 
+  if (body.byteLength > 0) diag.bodies++;
+
   new Reader(body).each((field, wire, r) => {
     if (field === FROM_RADIO.PACKET && wire === WIRE.LEN) {
       packets.push(r.bytes());
@@ -113,6 +155,8 @@ export function decodeFrames(body) {
     }
     return false;
   });
+
+  diag.packets += packets.length;
 
   /** @type {Position[]} */
   const out = [];
@@ -182,13 +226,26 @@ function decodeMeshPacket(buf) {
     }
   });
 
-  if (!decoded) return null; // encrypted, or a payload the radio could not open
+  if (!decoded) {
+    // Encrypted, or a payload the radio could not open for us.
+    diag.encrypted++;
+    return null;
+  }
 
-  const payload = decodeData(decoded);
-  if (!payload) return null;
+  const { portnum, payload } = decodeData(decoded);
+  if (portnum >= 0) diag.portnums.set(portnum, (diag.portnums.get(portnum) || 0) + 1);
+  if (portnum !== PORTNUM.POSITION_APP || !payload) return null;
 
   const pos = decodePosition(payload);
-  if (!pos) return null;
+  if (!pos) {
+    // A position payload that yields no coordinates means the field numbers
+    // or wire types here do not match this firmware. Keep the bytes so the
+    // problem can be diagnosed instead of guessed at.
+    diag.failures++;
+    diag.lastFailureHex = hex(payload);
+    return null;
+  }
+  diag.positions++;
 
   // hop_start counts down to hop_limit as a packet is relayed, so the
   // difference is hops actually traversed. Zero means heard direct.
@@ -216,9 +273,9 @@ function decodeMeshPacket(buf) {
 }
 
 /**
- * Unwrap Data, returning the payload only when it is a position.
+ * Unwrap Data into its portnum and payload.
  * @param {Uint8Array} buf
- * @returns {Uint8Array|null}
+ * @returns {{portnum: number, payload: Uint8Array|null}}
  */
 function decodeData(buf) {
   let portnum = -1;
@@ -230,7 +287,7 @@ function decodeData(buf) {
     return false;
   });
 
-  return portnum === PORTNUM.POSITION_APP ? payload : null;
+  return { portnum, payload };
 }
 
 /**
@@ -249,14 +306,18 @@ function decodePosition(buf) {
 
   new Reader(buf).each((field, wire, r) => {
     switch (field) {
+      // Schema says sfixed32, but accept a varint encoder too. Guessing wrong
+      // about the wire type would drop the coordinate silently, and tolerating
+      // both costs nothing.
       case POSITION.LATITUDE_I:
-        if (wire === WIRE.I32) { latI = r.i32(); return true; }
-        return false;
+        latI = wire === WIRE.I32 ? r.i32() : wire === WIRE.VARINT ? r.int32() : null;
+        return latI !== null;
       case POSITION.LONGITUDE_I:
-        if (wire === WIRE.I32) { lonI = r.i32(); return true; }
-        return false;
+        lonI = wire === WIRE.I32 ? r.i32() : wire === WIRE.VARINT ? r.int32() : null;
+        return lonI !== null;
       case POSITION.ALTITUDE:
         if (wire === WIRE.VARINT) { alt = r.int32(); return true; }
+        if (wire === WIRE.I32) { alt = r.i32(); return true; }
         return false;
       case POSITION.TIME:
         time = wire === WIRE.I32 ? r.u32() : r.varint();

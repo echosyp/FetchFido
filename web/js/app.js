@@ -10,6 +10,7 @@
 import { BleSource } from './sources/ble.js';
 import { WifiSource } from './sources/wifi.js';
 import * as store from './store.js';
+import { diag } from './meshtastic.js';
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, freshness, colourFor } from './geo.js';
 
@@ -276,6 +277,38 @@ function render() {
 
   el('stats').textContent =
     `${stats.received} received · ${stats.stored} stored · ${stats.duplicates} dup`;
+
+  renderDiag();
+}
+
+/**
+ * Report where incoming data stops.
+ *
+ * Without this, "no dogs on the map" is indistinguishable between nothing
+ * arriving, packets arriving encrypted, and positions arriving that fail to
+ * parse. Each has a different fix, so the app says which it is.
+ */
+function renderDiag() {
+  const ports = [...diag.portnums.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([p, n]) => `${p === 3 ? 'pos' : 'port' + p}:${n}`)
+    .join(' ');
+
+  const parts = [
+    `${diag.bodies} bodies`,
+    `${diag.packets} pkts`,
+    diag.encrypted ? `${diag.encrypted} encrypted` : null,
+    ports || null,
+    diag.failures ? `${diag.failures} DECODE FAIL` : null,
+  ].filter(Boolean);
+
+  const node = el('diag');
+  node.textContent = parts.join(' · ');
+  node.className = 'diag' + (diag.failures ? ' bad' : '');
+
+  if (diag.lastFailureHex) {
+    node.title = 'last failing position payload: ' + diag.lastFailureHex;
+  }
 }
 
 /**

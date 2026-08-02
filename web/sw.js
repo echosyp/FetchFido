@@ -14,7 +14,7 @@
  * an area is available offline when it has not been visited.
  */
 
-const SHELL = 'fetchfido-shell-v2';
+const SHELL = 'fetchfido-shell-v3';
 const TILES = 'fetchfido-tiles-v1';
 
 const SHELL_FILES = [

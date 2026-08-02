@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { decodeFromRadio, nodeId } from '../js/meshtastic.js';
+import { decodeFromRadio, decodeFrames, nodeId } from '../js/meshtastic.js';
 import { Reader } from '../js/protobuf.js';
 
 // ---- minimal protobuf encoder, test-only -----------------------------------
@@ -178,6 +178,40 @@ test('ignores non-position portnums', () => {
 
 test('ignores a frame carrying no packet', () => {
   assert.equal(decodeFromRadio(new Uint8Array([...tag(1, 0), ...varint(5)])), null);
+});
+
+console.log('concatenated bodies (HTTP transport)');
+
+test('returns every position in a multi-message body', () => {
+  // The HTTP API returns the whole queue in one response: many FromRadio
+  // messages back to back. Keeping only the last would drop real fixes.
+  const a = buildFrame({ ...REF, position: buildPosition({ lat: 37.7955, lon: -122.3937, alt: 1, time: 100, speed: 0, track: 0, sats: 5 }) });
+  const b = buildFrame({ ...REF, position: buildPosition({ lat: 37.8100, lon: -122.4100, alt: 2, time: 200, speed: 0, track: 0, sats: 6 }) });
+  const c = buildFrame({ ...REF, position: buildPosition({ lat: 37.8200, lon: -122.4200, alt: 3, time: 300, speed: 0, track: 0, sats: 7 }) });
+
+  const body = new Uint8Array([...a, ...b, ...c]);
+  const all = decodeFrames(body);
+  assert.equal(all.length, 3, 'all three positions must survive');
+  assert.deepEqual(all.map((p) => p.ts), [100, 200, 300]);
+});
+
+test('a position survives being followed by non-position messages', () => {
+  // The real failure: a config dump trailing the packet meant the last field-2
+  // was not a position, so the position ahead of it was discarded.
+  const pos = buildFrame(REF);
+  const other = new Uint8Array([...tag(7, 0), ...varint(42)]); // config_complete_id
+  const body = new Uint8Array([...pos, ...other]);
+  assert.equal(decodeFrames(body).length, 1);
+});
+
+test('tolerates a body with no positions at all', () => {
+  // What the config handshake actually returns: ~50 messages, no packets.
+  const body = new Uint8Array([
+    ...lenField(3, [...tag(1, 0), ...varint(7)]),   // my_info
+    ...lenField(4, [...tag(1, 0), ...varint(9)]),   // node_info
+    ...tag(7, 0), ...varint(42),                    // config_complete_id
+  ]);
+  assert.deepEqual(decodeFrames(body), []);
 });
 
 test('nodeId formats unsigned', () => {

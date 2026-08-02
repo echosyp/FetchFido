@@ -158,3 +158,5 @@ main {
     border-top: 1px solid var(--border);
   }
 }
+
+.geo { font-size: 12px; color: var(--warn); }

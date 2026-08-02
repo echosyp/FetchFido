@@ -24,10 +24,14 @@
   connect-src 'self' http: https:;
   object-src 'none';
   base-uri 'none';
-  form-action 'none';
-  frame-ancestors 'none'">
+  form-action 'none'">
+<!--
+  frame-ancestors is deliberately absent: it is ignored when delivered via
+  <meta> and must be sent as an HTTP header. The Go server should set it.
+-->
 
 <meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet.css">
 <link rel="stylesheet" href="css/app.css">
@@ -37,6 +41,7 @@
 <header class="bar">
   <h1>FetchFido</h1>
   <span id="status" class="status offline">offline</span>
+  <span id="geo" class="geo"></span>
   <span id="stats" class="stats"></span>
 </header>
 

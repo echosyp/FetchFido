@@ -187,18 +187,42 @@ async function onPosition(p) {
   render();
 }
 
-/** Handler's own position, for distance and bearing to each dog. */
+/**
+ * Handler's own position, for distance and bearing to each dog.
+ *
+ * Geolocation requires a secure context, which plain http on a LAN address is
+ * not. That conflicts with the WiFi transport, which requires http to avoid
+ * mixed-content blocking -- so over http you get positions but no range or
+ * bearing. Failure is surfaced rather than logged, because a silently missing
+ * distance reads as a bug.
+ */
 function watchHandler() {
-  if (!('geolocation' in navigator)) return;
+  if (!('geolocation' in navigator)) {
+    noteHandlerUnavailable('geolocation unsupported');
+    return;
+  }
   navigator.geolocation.watchPosition(
     (pos) => {
       handler = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      el('geo').textContent = '';
       map.setHandler(handler.lat, handler.lon);
       render();
     },
-    (err) => console.warn('geolocation', err.message),
+    (err) => {
+      noteHandlerUnavailable(
+        err.code === err.PERMISSION_DENIED && !window.isSecureContext
+          ? 'no range/bearing: needs https'
+          : `no range/bearing: ${err.message}`
+      );
+    },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
   );
+}
+
+/** @param {string} msg */
+function noteHandlerUnavailable(msg) {
+  handler = null;
+  el('geo').textContent = msg;
 }
 
 function render() {

@@ -14,13 +14,14 @@
  * an area is available offline when it has not been visited.
  */
 
-const SHELL = 'fetchfido-shell-v1';
+const SHELL = 'fetchfido-shell-v2';
 const TILES = 'fetchfido-tiles-v1';
 
 const SHELL_FILES = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './favicon.svg',
   './css/app.css',
   './vendor/leaflet.css',
   './vendor/leaflet.js',

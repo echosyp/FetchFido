@@ -20,7 +20,7 @@
  *     private IPs. Serving from the same LAN avoids this entirely.
  */
 
-import { decodeFromRadio, wantConfig } from '../meshtastic.js';
+import { decodeFrames, wantConfig } from '../meshtastic.js';
 import { BaseSource } from './base.js';
 
 /** Back-off when the radio has nothing queued. */
@@ -120,16 +120,16 @@ export class WifiSource extends BaseSource {
    * @returns {Promise<number>} bytes received; 0 means the queue is drained
    */
   async _pollOnce() {
-    const frame = await this._request('GET', 'api/v1/fromradio?all=true');
-    if (frame.byteLength === 0) return 0;
+    const body = await this._request('GET', 'api/v1/fromradio?all=true');
+    if (body.byteLength === 0) return 0;
     try {
-      const pos = decodeFromRadio(frame);
-      if (pos) this._emit(pos);
+      // One response can carry many FromRadio messages; emit every position.
+      for (const pos of decodeFrames(body)) this._emit(pos);
     } catch (err) {
-      // A malformed frame must not kill the poll loop.
+      // A malformed body must not kill the poll loop.
       console.warn('frame decode failed', err);
     }
-    return frame.byteLength;
+    return body.byteLength;
   }
 
   /**

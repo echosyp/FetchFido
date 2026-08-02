@@ -90,24 +90,54 @@ export function nodeId(num) {
 }
 
 /**
- * Decode one FromRadio frame. Returns a Position when the frame carried one,
- * otherwise null -- the overwhelming majority of frames are something else.
- * @param {Uint8Array} frame
- * @returns {Position|null}
+ * Decode a response body into every position it contains.
+ *
+ * A body may hold SEVERAL FromRadio messages concatenated back to back -- the
+ * HTTP API returns the whole queue in one response, and a config handshake
+ * alone produces around fifty of them. Protobuf concatenation is itself valid
+ * protobuf, so this parses as one message with repeated fields; the important
+ * part is collecting every `packet` rather than keeping only the last, which
+ * would silently drop all but one position per poll.
+ *
+ * @param {Uint8Array} body
+ * @returns {Position[]}
  */
-export function decodeFromRadio(frame) {
-  /** @type {Uint8Array|null} */
-  let packet = null;
+export function decodeFrames(body) {
+  /** @type {Uint8Array[]} */
+  const packets = [];
 
-  new Reader(frame).each((field, wire, r) => {
+  new Reader(body).each((field, wire, r) => {
     if (field === FROM_RADIO.PACKET && wire === WIRE.LEN) {
-      packet = r.bytes();
+      packets.push(r.bytes());
       return true;
     }
     return false;
   });
 
-  return packet ? decodeMeshPacket(packet) : null;
+  /** @type {Position[]} */
+  const out = [];
+  for (const p of packets) {
+    let pos = null;
+    try {
+      pos = decodeMeshPacket(p);
+    } catch (err) {
+      // One malformed packet must not discard the rest of the batch.
+      console.warn('packet decode failed', err);
+    }
+    if (pos) out.push(pos);
+  }
+  return out;
+}
+
+/**
+ * Decode a body expected to hold a single position. Retained for the BLE
+ * path, where the radio delivers one frame per read.
+ * @param {Uint8Array} frame
+ * @returns {Position|null}
+ */
+export function decodeFromRadio(frame) {
+  const all = decodeFrames(frame);
+  return all.length ? all[0] : null;
 }
 
 /**

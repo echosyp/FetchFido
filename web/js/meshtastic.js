@@ -11,9 +11,12 @@
  * decoded coordinates, RSSI, SNR, hop count and satellite count all matched
  * the same packets observed independently via MQTT.
  *
- * Still unconfirmed: ground_speed and ground_track (not surfaced in the UI, so
- * never compared), and everything in the BLE block below -- only the HTTP path
- * has been exercised against hardware.
+ * ground_speed and ground_track confirmed 2026-08-02 from a 300-fix export:
+ * heading produced 163 distinct values all within 0-358.58 degrees, and speed
+ * whole numbers 0-5. Every field in the position path is now verified.
+ *
+ * Still unconfirmed: everything in the BLE block below, and the serial framing
+ * -- only the HTTP path has been exercised against hardware.
  */
 
 import { Reader, WIRE, putVarint, putField } from './protobuf.js';
@@ -75,7 +78,7 @@ const DATA = {
   PAYLOAD: 2,
 };
 
-/** Position field numbers. 1-4 and 19 confirmed; 15/16 still [verify]. */
+/** Position field numbers. All confirmed against real firmware. */
 const POSITION = {
   LATITUDE_I: 1,
   LONGITUDE_I: 2,

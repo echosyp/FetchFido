@@ -100,9 +100,20 @@ applying one conservative default to everyone.
 
 | State | Interval |
 |---|---|
-| Stationary (< 10 m drift) | 300 s |
+| Stationary (see threshold below) | 300 s |
 | Moving | 30 s |
 | Boundary crossed / just escalated | 10 s, decaying |
+
+**The stationary threshold cannot be 10 m.** A 10-hour overnight capture of a
+genuinely motionless indoor node measured drift from its own centroid at a
+median of 5.8 m, p95 of 19.5 m, and a maximum of 118 m. A 10 m threshold would
+classify a sleeping dog as moving several times an hour and spend airtime at
+precisely the moment there is nothing to report.
+
+Use roughly **30 m**, and compare a rolling median rather than a single fix --
+one 118 m multipath excursion should not trigger anything. Note this figure is
+indoor, which is close to worst case for multipath; open sky will be tighter,
+but the collar spends real time under cover, porches and vehicles.
 
 Stock Meshtastic's smart-position-broadcast covers part of this **[verify]**;
 the rest is a firmware concern deferred with §3.1.

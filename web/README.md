@@ -77,6 +77,21 @@ Two things will block it, and the status badge names both:
   browser to talk to it. Serving this app *from the node itself* sidesteps the
   question entirely. [verify against firmware]
 
+**Use `http://127.0.0.1:8000`, not the LAN address, when testing on the machine
+running the server.** Loopback is treated as a trustworthy origin, so it is a
+secure context while still being an http page. That is the only combination
+that gets all three at once:
+
+| | LAN IP | Loopback | https |
+|---|---|---|---|
+| Can reach an http node | yes | yes | **no** (mixed content) |
+| Geolocation (range/bearing) | **no** | yes | yes |
+| Service worker / offline | **no** | yes | yes |
+
+On a plain-http LAN address `navigator.serviceWorker` is not even defined, so
+nothing is cached — reloads always fetch fresh code, and the offline promise
+does not hold. Worth knowing before concluding the app is serving stale files.
+
 Note `connect-src` in the CSP is relaxed to `http: https:` for this feature —
 the node address is arbitrary and CSP cannot express "any private address".
 That is the weakest line in the policy and it is there for this transport

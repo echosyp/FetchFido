@@ -6,15 +6,22 @@
  * Everything else is skipped. Decoding a narrow subset by hand is what lets
  * this app ship with no dependency tree; see docs/DESIGN.md section 3.1.
  *
- * Field numbers below are transcribed from the Meshtastic protobuf schema.
- * They are stable in practice but are NOT verified against a live radio in
- * this build -- see [verify] markers. If positions decode as null while
- * packets arrive, suspect these first.
+ * Field numbers below were transcribed from the Meshtastic protobuf schema and
+ * CONFIRMED against real firmware on 2026-08-02 over the HTTP transport:
+ * decoded coordinates, RSSI, SNR, hop count and satellite count all matched
+ * the same packets observed independently via MQTT.
+ *
+ * Still unconfirmed: ground_speed and ground_track (not surfaced in the UI, so
+ * never compared), and everything in the BLE block below -- only the HTTP path
+ * has been exercised against hardware.
  */
 
 import { Reader, WIRE, putVarint, putField } from './protobuf.js';
 
-/** Meshtastic BLE GATT service and characteristics. [verify against firmware] */
+/**
+ * Meshtastic BLE GATT service and characteristics.
+ * [verify] -- the BLE path has not yet been run against hardware.
+ */
 export const BLE = {
   SERVICE: '6ba1b218-15a8-461f-9fa8-5dcae273eafd',
   TO_RADIO: 'f75c76d2-129e-4dad-a1dd-7866124401e7',
@@ -53,7 +60,7 @@ const DATA = {
   PAYLOAD: 2,
 };
 
-/** Position field numbers. [verify -- 1-4 are high confidence, 15/16 less so] */
+/** Position field numbers. 1-4 and 19 confirmed; 15/16 still [verify]. */
 const POSITION = {
   LATITUDE_I: 1,
   LONGITUDE_I: 2,

@@ -6,10 +6,18 @@
  * Bluetooth nor Web Serial (docs/DESIGN.md section 5.1). It requires an
  * ESP32-class node -- nRF52 boards (T-Echo, RAK4631) have no WiFi radio.
  *
- * Protocol [verify against firmware]:
+ * Protocol, confirmed against real firmware 2026-08-02:
  *   GET  {base}/api/v1/fromradio?all=true  -> one FromRadio protobuf frame,
  *                                             zero-length body when drained
  *   PUT  {base}/api/v1/toradio             -> one ToRadio protobuf frame
+ *
+ * The want_config handshake is MANDATORY: before it the radio queues nothing
+ * and fromradio returns Content-Length: 0 indefinitely. After it, the queue
+ * delivers the node database and then live packets.
+ *
+ * A response body holds MANY FromRadio messages concatenated -- the handshake
+ * alone returned ~50 in 1479 bytes. Decoding only the first or last loses
+ * real positions.
  *
  * Two browser constraints govern deployment:
  *

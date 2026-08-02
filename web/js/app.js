@@ -9,6 +9,7 @@
 
 import { BleSource } from './sources/ble.js';
 import { WifiSource } from './sources/wifi.js';
+import { SerialSource } from './sources/serial.js';
 import * as store from './store.js';
 import { diag, labelFor, nodeNames } from './meshtastic.js';
 import { TrackMap } from './map.js';
@@ -63,7 +64,9 @@ function savePrefs(p) {
  * @param {string} address
  */
 function makeSource(kind, address) {
-  const s = kind === 'wifi' ? new WifiSource(address) : new BleSource();
+  const s = kind === 'wifi' ? new WifiSource(address)
+    : kind === 'serial' ? new SerialSource()
+    : new BleSource();
 
   s.onStatus((state, detail) => {
     const badge = el('status');
@@ -91,11 +94,22 @@ async function boot() {
   addressEl.value = prefs.address;
 
   const syncTransportUi = () => {
-    const wifi = transportEl.value === 'wifi';
-    addressEl.hidden = !wifi;
+    const kind = transportEl.value;
+    addressEl.hidden = kind !== 'wifi';
     const btn = /** @type {HTMLButtonElement} */ (el('connect'));
-    if (!wifi && !new BleSource().available()) {
-      el('status').textContent = 'Bluetooth unavailable — use the WiFi transport';
+
+    // Report an unusable transport up front rather than on click. Both BLE and
+    // Serial also need a secure context, which is the usual reason they are
+    // missing on a plain-http LAN address.
+    const probe = kind === 'ble' ? new BleSource()
+      : kind === 'serial' ? new SerialSource()
+      : null;
+
+    if (probe && !probe.available()) {
+      const why = window.isSecureContext
+        ? `${probe.name} unsupported in this browser`
+        : `${probe.name} needs a secure context — use 127.0.0.1 or https`;
+      el('status').textContent = why;
       el('status').className = 'status offline';
       btn.disabled = true;
     } else {

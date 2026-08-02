@@ -30,6 +30,8 @@ js/sources/types.js CollarSource contract
 js/sources/base.js  shared listener plumbing
 js/sources/ble.js   Web Bluetooth transport
 js/sources/wifi.js  HTTP transport (the only one iOS can use)
+js/sources/serial.js Web Serial transport (cable; preferred off-grid)
+js/framing.js       Meshtastic stream framing (serial only)
 js/store.js         IndexedDB, deduped on [deviceId, ts]
 js/geo.js           distance, bearing, freshness
 js/map.js           Leaflet wrapper
@@ -97,11 +99,49 @@ the node address is arbitrary and CSP cannot express "any private address".
 That is the weakest line in the policy and it is there for this transport
 alone.
 
+### USB cable transport
+
+Pick **USB cable** and hit Connect; the browser shows a port chooser. Works on
+desktop Chrome and Chrome for Android 150+ (with an OTG cable). Safari does not
+implement Web Serial.
+
+Unlike the HTTP transport, serial is **framed**: each FromRadio message is
+wrapped in `0x94 0xC3 <len-hi> <len-lo>`, and the device writes plain-text debug
+logs onto the same port. `js/framing.js` is a resumable state machine that
+extracts frames, discards log text, and resynchronises after noise. Discarded
+lines are kept in `SerialSource.log` -- useful when nothing else explains a
+silence.
+
+## Going off-grid
+
+This is the intended field configuration: phone plus a node on a cable, dogs
+carrying the remote nodes, no infrastructure at all.
+
+The catch is not the radio, it is **delivering the app**. Off-grid there is no
+server to load the page from, so it must already be cached -- which needs a
+service worker, which needs a secure context. Web Serial and Web Bluetooth
+*each* independently require a secure context too. So:
+
+1. Before leaving connectivity, open the app from a secure origin -- https, or
+   `chrome://flags/#unsafely-treat-insecure-origin-as-secure` with the LAN
+   origin listed.
+2. Install it (Chrome menu -> Install app). The service worker caches the shell.
+3. Off-grid, launch the installed app. It runs from cache, and the cable or
+   Bluetooth link to the node needs no network whatsoever.
+
+Skipping step 1 leaves you with an app that cannot be opened and a transport
+the browser refuses to expose.
+
+Map tiles are cached only for areas already viewed, so pan over the ground you
+intend to cover *before* you leave. Positions still record without a basemap,
+but you will be reading coordinates off a blank grid.
+
 ## Tests
 
 ```bash
 node web/test/decode.test.mjs   # protobuf reader and Meshtastic decode
 node web/test/wifi.test.mjs     # HTTP transport, with fetch stubbed
+node web/test/framing.test.mjs  # serial stream framing
 ```
 
 These build synthetic Meshtastic frames byte by byte and assert the decoder
@@ -122,8 +162,12 @@ Walk a node away from the radio, export, and plot delivery against distance.
 
 ## Status
 
-Working: BLE and WiFi transports, decode, dedupe store, map with trails,
-position age, distance and bearing, CSV export, offline shell.
+Working: WiFi transport (verified against real firmware), decode, dedupe store,
+map with trails, node names, position age, distance and bearing, CSV export,
+offline shell, diagnostics.
 
-Not built: serial and server transports, geofencing, device claiming, dog
-profiles, pre-cached offline map regions, any server at all.
+Written but NOT yet run against hardware: BLE and USB cable transports. Both
+are the off-grid path, so verifying them matters more than anything else here.
+
+Not built: server transport, geofencing, device claiming, dog profiles,
+pre-cached offline map regions, any server at all.

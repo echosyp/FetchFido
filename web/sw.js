@@ -14,7 +14,7 @@
  * an area is available offline when it has not been visited.
  */
 
-const SHELL = 'fetchfido-shell-v6';
+const SHELL = 'fetchfido-shell-v7';
 const TILES = 'fetchfido-tiles-v1';
 
 const SHELL_FILES = [
@@ -75,8 +75,23 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.origin === self.location.origin) {
+    // Stale-while-revalidate: serve the cache immediately so the app still
+    // opens with no network, but always refetch in the background so the next
+    // load is current. Pure cache-first meant a code change could not reach a
+    // browser at all without manually unregistering the worker -- which cost
+    // real debugging time and looked exactly like an application bug.
     event.respondWith(
-      caches.match(req).then((hit) => hit || fetch(req))
+      caches.open(SHELL).then((cache) =>
+        cache.match(req).then((hit) => {
+          const fresh = fetch(req)
+            .then((res) => {
+              if (res && res.ok) cache.put(req, res.clone());
+              return res;
+            })
+            .catch(() => hit);
+          return hit || fresh;
+        })
+      )
     );
   }
 });

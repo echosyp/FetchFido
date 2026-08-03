@@ -35,6 +35,15 @@ import { BaseSource } from './base.js';
 const IDLE_MS = 1500;
 /** Give up on a single request this long after starting it. */
 const TIMEOUT_MS = 8000;
+/**
+ * Re-request the node database after this long without a position.
+ *
+ * The node database arrives only with the want_config handshake, but it is the
+ * radio's live view of the mesh -- on a quiet mesh it is fresher than waiting
+ * for a node to happen to broadcast. Without this the map freezes at whatever
+ * was true when you connected.
+ */
+const REFRESH_MS = 120000;
 
 export class WifiSource extends BaseSource {
   /**
@@ -48,6 +57,7 @@ export class WifiSource extends BaseSource {
     /** @type {AbortController|null} */
     this._abort = null;
     this._running = false;
+    this._lastPosition = 0;
   }
 
   available() {
@@ -64,11 +74,11 @@ export class WifiSource extends BaseSource {
       // fromradio without this, so a failure here is not fatal -- but a
       // failure to reach the node at all is.
       try {
-        await this._request('PUT', 'api/v1/toradio',
-          wantConfig(Math.floor(Math.random() * 0xffffffff)));
+        await this._send(wantConfig(Math.floor(Math.random() * 0xffffffff)));
       } catch (err) {
         console.warn('want_config failed, continuing', err);
       }
+      this._lastPosition = Date.now();
 
       // Prove reachability before claiming connected. Whatever arrives in the
       // probe is emitted, not discarded -- the radio may already have a
@@ -107,6 +117,17 @@ export class WifiSource extends BaseSource {
         const bytes = await this._pollOnce();
         failures = 0;
 
+        if (Date.now() - this._lastPosition > REFRESH_MS) {
+          // Nothing heard lately: ask for the node database again rather than
+          // sit on a stale map waiting for a broadcast that may not come.
+          this._lastPosition = Date.now();
+          try {
+            await this._send(wantConfig(Math.floor(Math.random() * 0xffffffff)));
+          } catch (err) {
+            console.warn('node database refresh failed', err);
+          }
+        }
+
         if (bytes === 0) {
           if (this._status !== 'connected') this._setStatus('connected', this.base);
           await sleep(IDLE_MS, this._abort?.signal);
@@ -124,6 +145,14 @@ export class WifiSource extends BaseSource {
   }
 
   /**
+   * Send a ToRadio message.
+   * @param {Uint8Array} payload
+   */
+  async _send(payload) {
+    await this._request('PUT', 'api/v1/toradio', payload);
+  }
+
+  /**
    * Fetch one frame and emit it if it decodes to a position.
    * @returns {Promise<number>} bytes received; 0 means the queue is drained
    */
@@ -132,7 +161,10 @@ export class WifiSource extends BaseSource {
     if (body.byteLength === 0) return 0;
     try {
       // One response can carry many FromRadio messages; emit every position.
-      for (const pos of decodeFrames(body)) this._emit(pos);
+      for (const pos of decodeFrames(body)) {
+        this._lastPosition = Date.now();
+        this._emit(pos);
+      }
     } catch (err) {
       // A malformed body must not kill the poll loop.
       console.warn('frame decode failed', err);

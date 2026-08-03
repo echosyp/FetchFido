@@ -48,6 +48,10 @@ const FROM_RADIO = {
 const NODE_INFO = {
   NUM: 1,
   USER: 2,
+  POSITION: 3,
+  SNR: 4,
+  LAST_HEARD: 5,
+  HOPS_AWAY: 9,
 };
 
 /** User field numbers. */
@@ -102,7 +106,8 @@ const POSITION = {
  * @property {number|null} rssi  Field-test telemetry
  * @property {number|null} snr
  * @property {number|null} hops  Hops traversed, null if unknown
- * @property {'mesh'} link
+ * @property {'mesh'|'nodedb'} link  'nodedb' is a last-known position from the
+ *   node database rather than a packet heard live; it may be considerably old
  */
 
 /**
@@ -198,25 +203,76 @@ function readUser(buf, fallbackId) {
 
 /**
  * Parse a NodeInfo message from the config handshake.
+ *
+ * NodeInfo carries each known node's **last known position**, which is what
+ * the official Meshtastic client plots. Live POSITION_APP packets only arrive
+ * when a node happens to broadcast, so on a quiet mesh they may not come for
+ * many minutes -- ignoring the node database makes the app look dead while
+ * every other client shows the fleet.
+ *
+ * These positions can be old. They are returned like any other so the UI's
+ * existing age handling degrades them honestly.
+ *
  * @param {Uint8Array} buf
+ * @returns {Position|null}
  */
 function readNodeInfo(buf) {
   let num = 0;
   /** @type {Uint8Array|null} */ let user = null;
+  /** @type {Uint8Array|null} */ let position = null;
+  /** @type {number|null} */ let snr = null;
+  let lastHeard = 0;
+  /** @type {number|null} */ let hopsAway = null;
 
   new Reader(buf).each((field, wire, r) => {
-    if (field === NODE_INFO.NUM) {
-      num = wire === WIRE.I32 ? r.u32() : r.varint();
-      return true;
+    switch (field) {
+      case NODE_INFO.NUM:
+        num = wire === WIRE.I32 ? r.u32() : r.varint();
+        return true;
+      case NODE_INFO.USER:
+        if (wire === WIRE.LEN) { user = r.bytes(); return true; }
+        return false;
+      case NODE_INFO.POSITION:
+        if (wire === WIRE.LEN) { position = r.bytes(); return true; }
+        return false;
+      case NODE_INFO.SNR:
+        if (wire === WIRE.I32) { snr = r.f32(); return true; }
+        return false;
+      case NODE_INFO.LAST_HEARD:
+        lastHeard = wire === WIRE.I32 ? r.u32() : r.varint();
+        return true;
+      case NODE_INFO.HOPS_AWAY:
+        if (wire === WIRE.VARINT) { hopsAway = r.varint(); return true; }
+        return false;
+      default:
+        return false;
     }
-    if (field === NODE_INFO.USER && wire === WIRE.LEN) {
-      user = r.bytes();
-      return true;
-    }
-    return false;
   });
 
-  if (user) readUser(user, num ? nodeId(num) : undefined);
+  const id = num ? nodeId(num) : undefined;
+  if (user) readUser(user, id);
+  if (!position || !id) return null;
+
+  const pos = decodePosition(position);
+  if (!pos) return null;
+
+  diag.positions++;
+  return {
+    deviceId: id,
+    // The position's own GPS stamp is best; last_heard is when the node was
+    // last seen at all, which is a reasonable fallback.
+    ts: pos.time || lastHeard || Math.floor(Date.now() / 1000),
+    lat: pos.lat,
+    lon: pos.lon,
+    alt: pos.alt,
+    speed: pos.speed,
+    heading: pos.heading,
+    sats: pos.sats,
+    rssi: null,
+    snr,
+    hops: hopsAway,
+    link: 'nodedb',
+  };
 }
 
 export function resetDiag() {
@@ -245,6 +301,8 @@ export function resetDiag() {
 export function decodeFrames(body) {
   /** @type {Uint8Array[]} */
   const packets = [];
+  /** @type {Position[]} */
+  const fromDb = [];
 
   if (body.byteLength > 0) diag.bodies++;
 
@@ -253,11 +311,13 @@ export function decodeFrames(body) {
       packets.push(r.bytes());
       return true;
     }
-    // The handshake delivers the node database; harvest names from it so
-    // devices are labelled before they ever report a position.
+    // The handshake delivers the node database: names AND each node's last
+    // known position. Both are harvested, so the fleet appears immediately
+    // rather than only once a node happens to broadcast.
     if (field === FROM_RADIO.NODE_INFO && wire === WIRE.LEN) {
       try {
-        readNodeInfo(r.bytes());
+        const p = readNodeInfo(r.bytes());
+        if (p) fromDb.push(p);
       } catch (err) {
         console.warn('node info decode failed', err);
       }
@@ -280,7 +340,7 @@ export function decodeFrames(body) {
     }
     if (pos) out.push(pos);
   }
-  return out;
+  return [...fromDb, ...out];
 }
 
 /**

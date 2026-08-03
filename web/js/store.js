@@ -113,9 +113,34 @@ export async function allPositions() {
   return out.sort((a, b) => a.ts - b.ts);
 }
 
+/**
+ * Persist a node's names so labels survive a reload.
+ * @param {string} deviceId
+ * @param {{long: string, short: string}} name
+ */
+export async function putDevice(deviceId, name) {
+  const d = await open();
+  const tx = d.transaction('devices', 'readwrite');
+  await wrap(tx.objectStore('devices').put({ deviceId, ...name }));
+}
+
+/** @returns {Promise<{deviceId: string, long: string, short: string}[]>} */
+export async function allDevices() {
+  const d = await open();
+  const store = d.transaction('devices', 'readonly').objectStore('devices');
+  return wrap(store.getAll());
+}
+
 /** Clear the session. */
 export async function clear() {
   const d = await open();
   const tx = d.transaction('positions', 'readwrite');
   await wrap(tx.objectStore('positions').clear());
+}
+
+/** Forget stored node names too. */
+export async function clearDevices() {
+  const d = await open();
+  const tx = d.transaction('devices', 'readwrite');
+  await wrap(tx.objectStore('devices').clear());
 }

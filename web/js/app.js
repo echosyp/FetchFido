@@ -11,7 +11,7 @@ import { BleSource } from './sources/ble.js';
 import { WifiSource } from './sources/wifi.js';
 import { SerialSource } from './sources/serial.js';
 import * as store from './store.js';
-import { diag, labelFor, nodeNames } from './meshtastic.js';
+import { diag, labelFor, nodeNames, onNodeName, primeNodeName } from './meshtastic.js';
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, freshness, colourFor, relativeBearing } from './geo.js';
 import { Compass } from './heading.js';
@@ -162,6 +162,7 @@ async function boot() {
   el('clear').addEventListener('click', async () => {
     if (!confirm('Clear all stored positions for this session?')) return;
     await store.clear();
+    await store.clearDevices();
     tracks.clear();
     location.reload();
   });
@@ -169,6 +170,11 @@ async function boot() {
   el('nav-close').addEventListener('click', () => selectDevice(null));
 
   heading.onChange(renderNav);
+
+  onNodeName((id, name) => {
+    void store.putDevice(id, name).catch((err) => console.warn('name save failed', err));
+    render();
+  });
 
   watchHandler();
   registerServiceWorker();
@@ -185,8 +191,13 @@ function registerServiceWorker() {
   });
 }
 
-/** Reload any positions already held from a previous session. */
+/** Reload positions and names held from a previous session. */
 async function restore() {
+  // Names first, so restored tracks render labelled rather than as raw hex.
+  for (const d of await store.allDevices()) {
+    primeNodeName(d.deviceId, { long: d.long || '', short: d.short || '' });
+  }
+
   const ids = await store.devices();
   for (const id of ids) {
     tracks.set(id, await store.track(id));

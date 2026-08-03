@@ -167,6 +167,28 @@ export const nodeNames = new Map();
 
 const utf8 = new TextDecoder();
 
+/** @type {((id: string, name: NodeName) => void)[]} */
+const nameCbs = [];
+
+/**
+ * Observe names as they are learned, so they can be persisted. Names arrive
+ * only in a handshake or a NODEINFO_APP packet; without saving them the app
+ * shows raw node IDs after every reload until it reconnects.
+ * @param {(id: string, name: NodeName) => void} cb
+ */
+export function onNodeName(cb) {
+  nameCbs.push(cb);
+}
+
+/**
+ * Seed names from storage at startup.
+ * @param {string} id
+ * @param {NodeName} name
+ */
+export function primeNodeName(id, name) {
+  nodeNames.set(id, name);
+}
+
 /**
  * Best available label for a node: long name, else short name, else the ID.
  * @param {string} deviceId
@@ -198,7 +220,14 @@ function readUser(buf, fallbackId) {
   });
 
   const key = id || fallbackId;
-  if (key && (long || short)) nodeNames.set(key, { long, short });
+  if (key && (long || short)) {
+    const prev = nodeNames.get(key);
+    if (!prev || prev.long !== long || prev.short !== short) {
+      const name = { long, short };
+      nodeNames.set(key, name);
+      for (const cb of nameCbs) cb(key, name);
+    }
+  }
 }
 
 /**

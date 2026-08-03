@@ -262,16 +262,6 @@ function noteHandlerUnavailable(msg) {
 }
 
 /**
- * Escape text taken from the mesh. Node names are attacker-controlled: anyone
- * on the channel can set their own long name, and it is rendered into the DOM.
- * @param {string} v
- */
-function esc(v) {
-  return String(v).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
-}
-
-/**
  * Select a device to navigate to: centre the map on it and show the arrow.
  *
  * Compass startup happens here because iOS only grants orientation access from
@@ -342,59 +332,123 @@ function renderNav() {
   }
 }
 
+/**
+ * Live card elements, keyed by device.
+ *
+ * Cards are reused rather than rebuilt. render() runs every second so ages
+ * stay current, and tearing down the list that often reset the panel's scroll
+ * position and pulled the tap target out from under a finger mid-press --
+ * which made nodes further down the list effectively unreachable on a phone.
+ * @type {Map<string, ReturnType<typeof makeCard>>}
+ */
+const cards = new Map();
+
+/** @param {string} id */
+function makeCard(id) {
+  const mk = (/** @type {string} */ cls, /** @type {string} */ tag = 'div') => {
+    const e = document.createElement(tag);
+    e.className = cls;
+    return e;
+  };
+
+  const root = mk('dog');
+  root.style.borderLeftColor = colourFor(id);
+
+  const head = mk('dog-head');
+  const name = mk('dog-name', 'span');
+  const age = mk('age', 'span');
+  head.append(name, age);
+
+  const idline = mk('dog-id');
+  const range = mk('range');
+  const coords = mk('coords');
+  const radio = mk('radio');
+  const fixes = mk('fixes');
+
+  root.append(head, idline, range, coords, radio, fixes);
+  root.addEventListener('click', () => selectDevice(id));
+
+  return { root, name, age, idline, range, coords, radio, fixes };
+}
+
 function render() {
   const now = Date.now() / 1000;
   const panel = el('dogs');
-  panel.innerHTML = '';
 
   // Sort by display label so the list reads naturally, not by hex id.
-  const ids = [...tracks.keys()].sort((a, b) =>
-    labelFor(a).localeCompare(labelFor(b), undefined, { sensitivity: 'base' }));
+  const ids = [...tracks.keys()]
+    .filter((id) => (tracks.get(id) || []).length > 0)
+    .sort((a, b) => labelFor(a).localeCompare(labelFor(b), undefined, { sensitivity: 'base' }));
+
+  let empty = document.getElementById('dogs-empty');
   if (ids.length === 0) {
-    panel.innerHTML = '<p class="empty">No positions yet. Connect a radio and wait for a node to report.</p>';
+    if (!empty) {
+      empty = document.createElement('p');
+      empty.id = 'dogs-empty';
+      empty.className = 'empty';
+      empty.textContent = 'No positions yet. Connect a radio and wait for a node to report.';
+      panel.appendChild(empty);
+    }
+  } else if (empty) {
+    empty.remove();
   }
 
   for (const id of ids) {
     const list = tracks.get(id) || [];
-    if (list.length === 0) continue;
     const latest = list[list.length - 1];
-    const age = now - latest.ts;
-    const fresh = freshness(age);
+    const fresh = freshness(now - latest.ts);
 
     map.update(id, list, fresh.level);
 
-    let range = '';
+    let card = cards.get(id);
+    if (!card) {
+      card = makeCard(id);
+      cards.set(id, card);
+    }
+
+    // textContent throughout: names come off the mesh and are attacker
+    // controlled, and this way they are never parsed as markup at all.
+    card.root.className = 'dog ' + fresh.level + (id === selectedId ? ' selected' : '');
+    card.name.textContent = labelFor(id);
+    card.age.textContent = fresh.label;
+    card.age.className = 'age ' + fresh.level;
+
+    const short = nodeNames.get(id)?.short;
+    card.idline.textContent = short ? `${short} · ${id}` : id;
+
     if (handler) {
       const d = distance(handler.lat, handler.lon, latest.lat, latest.lon);
       const b = bearing(handler.lat, handler.lon, latest.lat, latest.lon);
-      range = `<div class="range">${formatDistance(d)} · ${compass(b)} ${Math.round(b)}&deg;</div>`;
+      card.range.textContent = `${formatDistance(d)} · ${compass(b)} ${Math.round(b)}°`;
+      card.range.hidden = false;
+    } else {
+      card.range.hidden = true;
     }
 
-    const radio = [
+    card.coords.textContent = `${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}`;
+    card.radio.textContent = [
       latest.rssi !== null ? `RSSI ${latest.rssi}` : null,
       latest.snr !== null ? `SNR ${latest.snr.toFixed(1)}` : null,
       latest.hops !== null ? (latest.hops === 0 ? 'direct' : `${latest.hops} hop${latest.hops > 1 ? 's' : ''}`) : null,
       latest.sats !== null ? `${latest.sats} sats` : null,
     ].filter(Boolean).join(' · ');
+    card.fixes.textContent = `${list.length} fixes`;
+  }
 
-    const card = document.createElement('div');
-    card.className = 'dog ' + fresh.level;
-    card.style.borderLeftColor = colourFor(id);
-    const named = nodeNames.get(id);
-    card.innerHTML = `
-      <div class="dog-head">
-        <span class="dog-name">${esc(labelFor(id))}</span>
-        <span class="age ${fresh.level}">${fresh.label}</span>
-      </div>
-      <div class="dog-id">${named?.short ? esc(named.short) + ' · ' : ''}${id}</div>
-      ${range}
-      <div class="coords">${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}</div>
-      <div class="radio">${radio || '&nbsp;'}</div>
-      <div class="fixes">${list.length} fixes</div>
-    `;
-    card.addEventListener('click', () => selectDevice(id));
-    if (id === selectedId) card.classList.add('selected');
-    panel.appendChild(card);
+  // Drop cards for devices that are gone (a session clear, mainly).
+  for (const [id, card] of cards) {
+    if (!ids.includes(id)) {
+      card.root.remove();
+      cards.delete(id);
+    }
+  }
+
+  // Reorder only when the order actually changed. Touching the DOM on every
+  // tick is what caused the scroll to jump.
+  const desired = ids.map((id) => /** @type {any} */ (cards.get(id)).root);
+  const current = [...panel.querySelectorAll('.dog')];
+  if (desired.length !== current.length || desired.some((n, i) => n !== current[i])) {
+    for (const node of desired) panel.appendChild(node);
   }
 
   el('stats').textContent =

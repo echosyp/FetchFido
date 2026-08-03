@@ -169,3 +169,57 @@ main {
 }
 .diag { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
 .diag.bad { color: var(--bad); }
+
+/* --- navigation panel ---------------------------------------------------- */
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  background: #10203a;
+  border-bottom: 1px solid var(--border);
+}
+.nav[hidden] { display: none; }
+
+.nav-arrow-wrap {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg);
+}
+
+.nav-arrow {
+  width: 40px;
+  height: 40px;
+  color: var(--accent);
+  /* Short, so the arrow tracks the compass without looking laggy. */
+  transition: transform 120ms linear;
+}
+.nav-arrow.idle { color: var(--muted); opacity: 0.5; }
+
+.nav-text { flex: 1; min-width: 0; }
+.nav-name { font-weight: 600; font-size: 15px; }
+/* The number read at a glance, at arm's length, in daylight. */
+.nav-dist { font-size: 30px; font-weight: 700; line-height: 1.1; }
+.nav-bearing { font-size: 13px; color: var(--muted); }
+.nav-mode { font-size: 11px; color: var(--warn); }
+
+.nav-close {
+  background: transparent;
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
+  padding: 4px 10px;
+  flex-shrink: 0;
+}
+
+.dog { cursor: pointer; }
+.dog.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}

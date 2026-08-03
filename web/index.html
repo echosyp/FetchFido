@@ -61,6 +61,21 @@
   <button id="clear" class="danger">Clear</button>
 </div>
 
+<div id="nav" class="nav" hidden>
+  <div class="nav-arrow-wrap">
+    <svg id="nav-arrow" class="nav-arrow" viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M50 6 L78 88 L50 70 L22 88 Z" fill="currentColor"/>
+    </svg>
+  </div>
+  <div class="nav-text">
+    <div id="nav-name" class="nav-name"></div>
+    <div id="nav-dist" class="nav-dist"></div>
+    <div id="nav-bearing" class="nav-bearing"></div>
+    <div id="nav-mode" class="nav-mode"></div>
+  </div>
+  <button id="nav-close" class="nav-close" aria-label="Stop navigating">&times;</button>
+</div>
+
 <main>
   <div id="map"></div>
   <aside id="dogs" class="dogs"></aside>

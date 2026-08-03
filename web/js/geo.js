@@ -40,6 +40,17 @@ export function bearing(lat1, lon1, lat2, lon2) {
   return (deg(Math.atan2(y, x)) + 360) % 360;
 }
 
+/**
+ * Bearing expressed relative to the direction the device is facing, so an
+ * arrow drawn at this angle points at the target in the real world.
+ * @param {number} bearing degrees true, to the target
+ * @param {number} heading degrees true, the way the device is pointing
+ * @returns {number} 0 = straight ahead
+ */
+export function relativeBearing(bearing, heading) {
+  return ((bearing - heading) % 360 + 360) % 360;
+}
+
 const POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
   'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
 

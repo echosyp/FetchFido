@@ -33,7 +33,8 @@ js/sources/wifi.js  HTTP transport (the only one iOS can use)
 js/sources/serial.js Web Serial transport (cable; preferred off-grid)
 js/framing.js       Meshtastic stream framing (serial only)
 js/store.js         IndexedDB, deduped on [deviceId, ts]
-js/geo.js           distance, bearing, freshness
+js/geo.js           distance, bearing, relative bearing, freshness
+js/heading.js       device compass (DeviceOrientation)
 js/map.js           Leaflet wrapper
 js/app.js           wiring
 test/decode.test.mjs
@@ -142,6 +143,7 @@ but you will be reading coordinates off a blank grid.
 node web/test/decode.test.mjs   # protobuf reader and Meshtastic decode
 node web/test/wifi.test.mjs     # HTTP transport, with fetch stubbed
 node web/test/framing.test.mjs  # serial stream framing
+node web/test/geo.test.mjs      # distance, bearing, arrow rotation
 ```
 
 These build synthetic Meshtastic frames byte by byte and assert the decoder
@@ -162,9 +164,15 @@ Walk a node away from the radio, export, and plot delivery against distance.
 
 ## Status
 
-Working: WiFi transport (verified against real firmware), decode, dedupe store,
-map with trails, node names, position age, distance and bearing, CSV export,
-offline shell, diagnostics.
+Working: WiFi transport (verified against real firmware), decode of both live
+packets and the node database, dedupe store, map with trails, node names,
+position age, tap-to-focus, direction indicator, CSV export, offline shell,
+diagnostics.
+
+The direction indicator needs a compass to point at anything. Without
+`DeviceOrientation` -- desktops, and phones that only report relative
+orientation -- it falls back to north-up and says so, because an arrow that
+looks absolute while being relative walks you the wrong way.
 
 Written but NOT yet run against hardware: BLE and USB cable transports. Both
 are the off-grid path, so verifying them matters more than anything else here.

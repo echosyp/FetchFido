@@ -13,7 +13,8 @@ import { SerialSource } from './sources/serial.js';
 import * as store from './store.js';
 import { diag, labelFor, nodeNames } from './meshtastic.js';
 import { TrackMap } from './map.js';
-import { distance, bearing, compass, formatDistance, freshness, colourFor } from './geo.js';
+import { distance, bearing, compass, formatDistance, freshness, colourFor, relativeBearing } from './geo.js';
+import { Compass } from './heading.js';
 
 /** @typedef {import('./meshtastic.js').Position} Position */
 
@@ -22,6 +23,11 @@ const tracks = new Map();
 
 /** @type {{lat: number, lon: number}|null} */
 let handler = null;
+
+/** Device currently being navigated to, or null. */
+let selectedId = /** @type {string|null} */ (null);
+
+const heading = new Compass();
 
 /** Field-test counters (docs/DESIGN.md section 11). */
 const stats = { received: 0, stored: 0, duplicates: 0 };
@@ -160,6 +166,10 @@ async function boot() {
     location.reload();
   });
 
+  el('nav-close').addEventListener('click', () => selectDevice(null));
+
+  heading.onChange(renderNav);
+
   watchHandler();
   registerServiceWorker();
   setInterval(render, 1000); // ages must tick even with no new packets
@@ -250,6 +260,73 @@ function esc(v) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
 }
 
+/**
+ * Select a device to navigate to: centre the map on it and show the arrow.
+ *
+ * Compass startup happens here because iOS only grants orientation access from
+ * a user gesture, and tapping a dog is the natural one.
+ *
+ * @param {string|null} id
+ */
+function selectDevice(id) {
+  selectedId = id;
+  if (id) {
+    map.focus(id);
+    void heading.start();
+  }
+  render();
+}
+
+/**
+ * Draw the direction indicator.
+ *
+ * With a compass the arrow points at the dog in the real world. Without one it
+ * can only be drawn north-up, which is still usable with a map but must say so
+ * -- an arrow that looks absolute while being relative would walk someone the
+ * wrong way.
+ */
+function renderNav() {
+  const nav = el('nav');
+  const list = selectedId ? tracks.get(selectedId) : null;
+
+  if (!selectedId || !list || list.length === 0) {
+    nav.hidden = true;
+    return;
+  }
+  nav.hidden = false;
+
+  const latest = list[list.length - 1];
+  el('nav-name').textContent = labelFor(selectedId);
+
+  const arrow = el('nav-arrow');
+  if (!handler) {
+    el('nav-dist').textContent = '—';
+    el('nav-bearing').textContent = 'waiting for your location';
+    el('nav-mode').textContent = window.isSecureContext ? '' : 'needs https or 127.0.0.1';
+    arrow.style.transform = 'rotate(0deg)';
+    arrow.classList.add('idle');
+    return;
+  }
+  arrow.classList.remove('idle');
+
+  const d = distance(handler.lat, handler.lon, latest.lat, latest.lon);
+  const b = bearing(handler.lat, handler.lon, latest.lat, latest.lon);
+
+  el('nav-dist').textContent = formatDistance(d);
+  el('nav-bearing').textContent = `${compass(b)} ${Math.round(b)}\u00b0`;
+
+  const h = heading.heading;
+  if (h === null) {
+    arrow.style.transform = `rotate(${b}deg)`;
+    el('nav-mode').textContent = heading.relativeOnly
+      ? 'north up — no compass reference'
+      : 'north up — hold the map north';
+  } else {
+    arrow.style.transform = `rotate(${relativeBearing(b, h)}deg)`;
+    el('nav-mode').textContent = 'pointing at target';
+  }
+}
+
 function render() {
   const now = Date.now() / 1000;
   const panel = el('dogs');
@@ -300,6 +377,8 @@ function render() {
       <div class="radio">${radio || '&nbsp;'}</div>
       <div class="fixes">${list.length} fixes</div>
     `;
+    card.addEventListener('click', () => selectDevice(id));
+    if (id === selectedId) card.classList.add('selected');
     panel.appendChild(card);
   }
 
@@ -307,6 +386,7 @@ function render() {
     `${stats.received} received · ${stats.stored} stored · ${stats.duplicates} dup`;
 
   renderDiag();
+  renderNav();
 }
 
 /**

@@ -115,6 +115,20 @@ export class TrackMap {
     );
   }
 
+  /**
+   * Centre on one device and open its popup.
+   * @param {string} deviceId
+   * @param {number} [minZoom] never zoom out past what the user already chose
+   * @returns {boolean} whether the device was on the map
+   */
+  focus(deviceId, minZoom = 17) {
+    const marker = this._markers.get(deviceId);
+    if (!marker) return false;
+    this.map.setView(marker.getLatLng(), Math.max(this.map.getZoom(), minZoom));
+    marker.openPopup();
+    return true;
+  }
+
   /** Fit the view to everything currently plotted. */
   fitAll() {
     const layers = [...this._markers.values()];

@@ -329,8 +329,12 @@ function renderNav() {
   const h = heading.heading;
   if (h === null) {
     arrow.style.transform = `rotate(${b}deg)`;
-    el('nav-mode').textContent = heading.relativeOnly
-      ? 'north up — no compass reference'
+    // Say *why* there is no compass. "North up" alone reads as a choice; the
+    // usual cause is an insecure origin withholding the sensor entirely.
+    el('nav-mode').textContent =
+      !window.isSecureContext ? 'north up — compass needs https'
+      : heading.relativeOnly ? 'north up — no compass reference'
+      : !heading.available() ? 'north up — no compass on this device'
       : 'north up — hold the map north';
   } else {
     arrow.style.transform = `rotate(${relativeBearing(b, h)}deg)`;

@@ -325,6 +325,30 @@ The question to answer: at what distance, at 40 cm off the ground, in timber,
 does packet delivery fall below usable? That single curve drives preset defaults,
 cadence, and whether mesh-only is viable at all.
 
+## 10a. One client per node
+
+A node's phone API queue is **drain-on-read and single-consumer**. Every read of
+`fromradio` permanently removes packets from it, so two clients attached to the
+same node do not each get a copy -- they race, and each sees roughly half the
+traffic. The same is true of the BLE characteristic.
+
+Observed directly: with a browser tab connected, an independent `curl` to
+`fromradio` returns `200` with zero bytes, and the browser's packet counter
+stops advancing while any second client polls.
+
+Consequences:
+
+- **Debugging tools starve the app.** Polling a node "just to look" while the
+  app is connected makes the app appear broken. Diagnose from the app's own
+  counters, or disconnect it first.
+- **Two handlers cannot share one node.** Group tracking -- several people
+  following the same dogs, which Garmin supports -- needs either a node each,
+  or the server as the fan-out point. Worth stating before anyone designs
+  around a shared node.
+- A gateway that also forwards to MQTT is unaffected: MQTT is a separate path
+  and does not consume the phone API queue. That is why MQTT kept showing
+  positions throughout an outage that starved the app.
+
 ## 11a. Collars versus infrastructure
 
 Field testing surfaced a gap not anticipated in section 10: **every

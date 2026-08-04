@@ -116,6 +116,17 @@ export class TrackMap {
   }
 
   /**
+   * Remove a device from the map entirely.
+   * @param {string} deviceId
+   */
+  drop(deviceId) {
+    const m = this._markers.get(deviceId);
+    if (m) { this.map.removeLayer(m); this._markers.delete(deviceId); }
+    const t = this._tracks.get(deviceId);
+    if (t) { this.map.removeLayer(t); this._tracks.delete(deviceId); }
+  }
+
+  /**
    * Centre on one device and open its popup.
    * @param {string} deviceId
    * @param {number} [minZoom] never zoom out past what the user already chose

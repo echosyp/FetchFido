@@ -114,17 +114,24 @@ export async function allPositions() {
 }
 
 /**
- * Persist a node's names so labels survive a reload.
+ * Merge a patch into a device record.
+ *
+ * Names and roles are written by different code paths at different times, so
+ * this reads first -- a blind put would have naming clobber the role a user
+ * had set, and vice versa.
+ *
  * @param {string} deviceId
- * @param {{long: string, short: string}} name
+ * @param {{long?: string, short?: string, role?: string}} patch
  */
-export async function putDevice(deviceId, name) {
+export async function putDevice(deviceId, patch) {
   const d = await open();
   const tx = d.transaction('devices', 'readwrite');
-  await wrap(tx.objectStore('devices').put({ deviceId, ...name }));
+  const store = tx.objectStore('devices');
+  const existing = (await wrap(store.get(deviceId))) || { deviceId };
+  await wrap(store.put({ ...existing, ...patch, deviceId }));
 }
 
-/** @returns {Promise<{deviceId: string, long: string, short: string}[]>} */
+/** @returns {Promise<{deviceId: string, long?: string, short?: string, role?: string}[]>} */
 export async function allDevices() {
   const d = await open();
   const store = d.transaction('devices', 'readonly').objectStore('devices');

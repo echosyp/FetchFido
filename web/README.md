@@ -152,10 +152,29 @@ cannot verify is whether the **field numbers** match current firmware — those
 are marked `[verify]` in `js/meshtastic.js` and need one session with real
 hardware.
 
+## Collars vs infrastructure
+
+Every position-reporting node on the mesh renders as a dog by default --
+including stationary repeaters, the gateway itself, and on a community mesh
+every stranger's node.
+
+Tap the **collar / infra** chip on a card to mark what a node is; it persists.
+The toolbar button toggles between showing everything and collars only, and
+hiding a node removes its marker and trail from the map as well.
+
+Marking is local to this browser. It is the cheap stand-in for device claiming
+(PRD section 8.1), which is what will eventually do this properly.
+
 ## Field test instrumentation
 
 Every stored position carries `rssi`, `snr` and `hops`, and **Export CSV**
-writes them out. Duplicate deliveries are counted separately and shown in the
+writes them out.
+
+**Filter the CSV to `link=mesh` before computing delivery ratio.** Rows with
+`link=nodedb` are the radio's last-known values from the node database, not
+packets heard over the air -- they have no RSSI, and counting them as
+deliveries would inflate the result. Cards show `from node db` when the latest
+fix came that way. Duplicate deliveries are counted separately and shown in the
 header as `dup` — that is a direct measure of mesh relay redundancy.
 
 The question this is built to answer (docs/DESIGN.md section 11): at 40 cm off

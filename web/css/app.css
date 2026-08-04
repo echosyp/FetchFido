@@ -223,3 +223,22 @@ main {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+
+/* --- device role --------------------------------------------------------- */
+
+.role {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-left: 8px;
+}
+.role.infra { color: var(--warn); border-color: var(--warn); }
+
+.dog.infra { border-left-color: var(--muted) !important; }
+
+#filter.active { background: #1f4d2b; }

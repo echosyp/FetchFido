@@ -27,6 +27,19 @@ let handler = null;
 /** Device currently being navigated to, or null. */
 let selectedId = /** @type {string|null} */ (null);
 
+/**
+ * Device roles.
+ *
+ * Every position-reporting node renders as a dog otherwise -- including
+ * stationary repeaters, the gateway itself, and on a community mesh every
+ * stranger's node (docs/DESIGN.md section 11a). Marking a node as
+ * infrastructure hides it without discarding its data.
+ * @type {Map<string, 'collar'|'infra'>}
+ */
+const roles = new Map();
+
+let hideInfra = false;
+
 const heading = new Compass();
 
 /** Field-test counters (docs/DESIGN.md section 11). */
@@ -46,12 +59,13 @@ function el(id) {
   return e;
 }
 
-/** @returns {{transport: string, address: string}} */
+/** @returns {{transport: string, address: string, hideInfra?: boolean}} */
 function loadPrefs() {
   try {
-    return { transport: 'ble', address: '', ...JSON.parse(localStorage.getItem(PREFS) || '{}') };
+    return { transport: 'ble', address: '', hideInfra: false,
+      ...JSON.parse(localStorage.getItem(PREFS) || '{}') };
   } catch {
-    return { transport: 'ble', address: '' };
+    return { transport: 'ble', address: '', hideInfra: false };
   }
 }
 
@@ -167,6 +181,20 @@ async function boot() {
     location.reload();
   });
 
+  hideInfra = !!prefs.hideInfra;
+  const filterBtn = /** @type {HTMLButtonElement} */ (el('filter'));
+  const syncFilter = () => {
+    filterBtn.textContent = hideInfra ? 'Showing collars' : 'Showing all';
+    filterBtn.classList.toggle('active', hideInfra);
+  };
+  filterBtn.addEventListener('click', () => {
+    hideInfra = !hideInfra;
+    savePrefs({ transport: transportEl.value, address: addressEl.value, hideInfra });
+    syncFilter();
+    render();
+  });
+  syncFilter();
+
   el('nav-close').addEventListener('click', () => selectDevice(null));
 
   heading.onChange(renderNav);
@@ -195,7 +223,10 @@ function registerServiceWorker() {
 async function restore() {
   // Names first, so restored tracks render labelled rather than as raw hex.
   for (const d of await store.allDevices()) {
-    primeNodeName(d.deviceId, { long: d.long || '', short: d.short || '' });
+    if (d.long || d.short) {
+      primeNodeName(d.deviceId, { long: d.long || '', short: d.short || '' });
+    }
+    if (d.role === 'collar' || d.role === 'infra') roles.set(d.deviceId, d.role);
   }
 
   const ids = await store.devices();
@@ -259,6 +290,19 @@ function watchHandler() {
 function noteHandlerUnavailable(msg) {
   handler = null;
   el('geo').textContent = msg;
+}
+
+/**
+ * Cycle a device between collar and infrastructure.
+ * @param {string} id
+ */
+function toggleRole(id) {
+  const next = roles.get(id) === 'infra' ? 'collar' : 'infra';
+  roles.set(id, next);
+  void store.putDevice(id, { role: next }).catch((err) => console.warn('role save failed', err));
+  // Hiding the device you are navigating to would strand the arrow.
+  if (next === 'infra' && hideInfra && selectedId === id) selectedId = null;
+  render();
 }
 
 /**
@@ -359,6 +403,11 @@ function makeCard(id) {
   const age = mk('age', 'span');
   head.append(name, age);
 
+  const role = mk('role', 'button');
+  role.type = 'button';
+  role.title = 'Mark as collar or infrastructure';
+  head.append(role);
+
   const idline = mk('dog-id');
   const range = mk('range');
   const coords = mk('coords');
@@ -367,8 +416,13 @@ function makeCard(id) {
 
   root.append(head, idline, range, coords, radio, fixes);
   root.addEventListener('click', () => selectDevice(id));
+  role.addEventListener('click', (e) => {
+    // Otherwise the tap also selects the card and moves the map.
+    e.stopPropagation();
+    toggleRole(id);
+  });
 
-  return { root, name, age, idline, range, coords, radio, fixes };
+  return { root, name, age, idline, range, coords, radio, fixes, role };
 }
 
 function render() {
@@ -378,6 +432,7 @@ function render() {
   // Sort by display label so the list reads naturally, not by hex id.
   const ids = [...tracks.keys()]
     .filter((id) => (tracks.get(id) || []).length > 0)
+    .filter((id) => !(hideInfra && roles.get(id) === 'infra'))
     .sort((a, b) => labelFor(a).localeCompare(labelFor(b), undefined, { sensitivity: 'base' }));
 
   let empty = document.getElementById('dogs-empty');
@@ -408,7 +463,12 @@ function render() {
 
     // textContent throughout: names come off the mesh and are attacker
     // controlled, and this way they are never parsed as markup at all.
-    card.root.className = 'dog ' + fresh.level + (id === selectedId ? ' selected' : '');
+    const role = roles.get(id);
+    card.root.className = 'dog ' + fresh.level +
+      (id === selectedId ? ' selected' : '') +
+      (role === 'infra' ? ' infra' : '');
+    card.role.textContent = role === 'infra' ? 'infra' : 'collar';
+    card.role.className = 'role' + (role === 'infra' ? ' infra' : '');
     card.name.textContent = labelFor(id);
     card.age.textContent = fresh.label;
     card.age.className = 'age ' + fresh.level;
@@ -427,6 +487,10 @@ function render() {
 
     card.coords.textContent = `${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}`;
     card.radio.textContent = [
+      // A node-database entry is the radio's last-known value, not a packet we
+      // heard -- it has no RSSI, and counting it as a delivery would inflate
+      // the range-test numbers.
+      latest.link === 'nodedb' ? 'from node db' : null,
       latest.rssi !== null ? `RSSI ${latest.rssi}` : null,
       latest.snr !== null ? `SNR ${latest.snr.toFixed(1)}` : null,
       latest.hops !== null ? (latest.hops === 0 ? 'direct' : `${latest.hops} hop${latest.hops > 1 ? 's' : ''}`) : null,
@@ -435,11 +499,13 @@ function render() {
     card.fixes.textContent = `${list.length} fixes`;
   }
 
-  // Drop cards for devices that are gone (a session clear, mainly).
+  // Drop cards and map layers for devices no longer listed -- either cleared,
+  // or filtered out as infrastructure.
   for (const [id, card] of cards) {
     if (!ids.includes(id)) {
       card.root.remove();
       cards.delete(id);
+      map.drop(id);
     }
   }
 

@@ -152,6 +152,17 @@ cannot verify is whether the **field numbers** match current firmware — those
 are marked `[verify]` in `js/meshtastic.js` and need one session with real
 hardware.
 
+## Nodes with no GPS fix
+
+A node the radio has heard but that carries no position still gets a card,
+marked **NO GPS FIX** with when it was last heard and its signal.
+
+This distinction is the point: a collar transmitting clearly without a fix
+(indoors, under cover, or after a config reset drops its almanac) is a
+completely different problem from a collar that has gone silent. Omitting the
+first makes it look like the second, and they call for opposite responses --
+check the device, versus go and look for the dog.
+
 ## Collars vs infrastructure
 
 Every position-reporting node on the mesh renders as a dog by default --

@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { decodeFromRadio, decodeFrames, nodeId, nodeNames, labelFor } from '../js/meshtastic.js';
+import { decodeFromRadio, decodeFrames, nodeId, nodeNames, labelFor, nodeStatus } from '../js/meshtastic.js';
 import { Reader } from '../js/protobuf.js';
 
 // ---- minimal protobuf encoder, test-only -----------------------------------
@@ -284,6 +284,53 @@ test('a hostile name is stored raw, for the UI to escape', () => {
 test('nodeId formats unsigned', () => {
   assert.equal(nodeId(0xa1b2c3d4), '!a1b2c3d4');
   assert.equal(nodeId(0x0000000f), '!0000000f');
+});
+
+
+console.log('node status (heard vs positioned)');
+
+test('records a node heard with no position', () => {
+  // The Sage case: alive on the mesh, clear signal, no GPS fix. It must be
+  // known about, not silently absent.
+  const nodeInfo = [
+    ...tag(1, 0), ...varint(0xaca2feb7),
+    ...lenField(2, buildUser({ id: '!aca2feb7', long: 'Sage', short: 'sage' })),
+    ...tag(5, 0), ...varint(1_780_000_000),   // last_heard
+    ...tag(9, 0), ...varint(0),               // hops_away
+  ];
+  const out = decodeFrames(new Uint8Array(lenField(4, nodeInfo)));
+  assert.equal(out.length, 0, 'no position to plot');
+
+  const st = nodeStatus.get('!aca2feb7');
+  assert.ok(st, 'node must still be known');
+  assert.equal(st.hasPosition, false);
+  assert.equal(st.lastHeard, 1_780_000_000);
+  assert.equal(st.hops, 0);
+});
+
+test('marks a node as positioned once one arrives', () => {
+  const nodeInfo = [
+    ...tag(1, 0), ...varint(0xaca2feb7),
+    ...lenField(3, buildPosition({
+      lat: 37.7955, lon: -122.3937, alt: 1, time: 1_780_000_500,
+      speed: 0, track: 0, sats: 8,
+    })),
+    ...tag(5, 0), ...varint(1_780_000_500),
+  ];
+  const out = decodeFrames(new Uint8Array(lenField(4, nodeInfo)));
+  assert.equal(out.length, 1);
+  assert.equal(out[0].link, 'nodedb');
+  assert.equal(nodeStatus.get('!aca2feb7').hasPosition, true);
+});
+
+test('a live packet counts as heard even when not a position', () => {
+  const before = nodeStatus.get('!11223344');
+  assert.equal(before, undefined);
+  // portnum 67 (telemetry) carries no position, but proves the node is alive.
+  decodeFrames(buildFrame({ ...REF, portnum: 67 }));
+  const st = nodeStatus.get(nodeId(REF.from));
+  assert.ok(st, 'telemetry should still mark the node heard');
+  assert.equal(st.hops, 2, 'hop count available from the packet header');
 });
 
 console.log(`\n${passed} passed`);

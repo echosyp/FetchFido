@@ -167,6 +167,40 @@ export const nodeNames = new Map();
 
 const utf8 = new TextDecoder();
 
+/**
+ * @typedef {object} NodeStatus
+ * @property {number} lastHeard  epoch seconds the node was last heard at all
+ * @property {number|null} snr
+ * @property {number|null} hops
+ * @property {boolean} hasPosition
+ */
+
+/**
+ * Every node the radio knows about, whether or not it has a position.
+ *
+ * A collar can be transmitting clearly and still have no GPS fix -- indoors,
+ * under cover, or after a config reset drops its almanac. Tracking only
+ * positions makes that node vanish from the UI, which is indistinguishable
+ * from a collar that is out of range or switched off. Those call for opposite
+ * responses, so the two states must be told apart.
+ * @type {Map<string, NodeStatus>}
+ */
+export const nodeStatus = new Map();
+
+/**
+ * Record that a node was heard.
+ * @param {string} id
+ * @param {Partial<NodeStatus>} patch
+ */
+function markHeard(id, patch) {
+  const prev = nodeStatus.get(id);
+  nodeStatus.set(id, {
+    lastHeard: 0, snr: null, hops: null, hasPosition: false,
+    ...prev,
+    ...patch,
+  });
+}
+
 /** @type {((id: string, name: NodeName) => void)[]} */
 const nameCbs = [];
 
@@ -280,9 +314,17 @@ function readNodeInfo(buf) {
 
   const id = num ? nodeId(num) : undefined;
   if (user) readUser(user, id);
-  if (!position || !id) return null;
+  if (!id) return null;
 
-  const pos = decodePosition(position);
+  const pos = position ? decodePosition(position) : null;
+
+  markHeard(id, {
+    lastHeard: lastHeard || Math.floor(Date.now() / 1000),
+    snr,
+    hops: hopsAway,
+    hasPosition: !!pos,
+  });
+
   if (!pos) return null;
 
   diag.positions++;
@@ -425,6 +467,20 @@ function decodeMeshPacket(buf) {
     }
   });
 
+  // hop_start counts down to hop_limit as a packet is relayed, so the
+  // difference is hops actually traversed. Zero means heard direct.
+  const hops = (hopStart !== null && hopLimit !== null)
+    ? Math.max(0, hopStart - hopLimit)
+    : null;
+
+  // Hearing anything at all from a node is meaningful, even a payload we do
+  // not use -- it distinguishes "no GPS fix" from "gone".
+  markHeard(nodeId(from), {
+    lastHeard: rxTime || Math.floor(Date.now() / 1000),
+    snr,
+    hops,
+  });
+
   if (!decoded) {
     // Encrypted, or a payload the radio could not open for us.
     diag.encrypted++;
@@ -457,12 +513,6 @@ function decodeMeshPacket(buf) {
     return null;
   }
   diag.positions++;
-
-  // hop_start counts down to hop_limit as a packet is relayed, so the
-  // difference is hops actually traversed. Zero means heard direct.
-  const hops = (hopStart !== null && hopLimit !== null)
-    ? Math.max(0, hopStart - hopLimit)
-    : null;
 
   return {
     deviceId: nodeId(from),

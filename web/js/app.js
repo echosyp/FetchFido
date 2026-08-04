@@ -11,9 +11,9 @@ import { BleSource } from './sources/ble.js';
 import { WifiSource } from './sources/wifi.js';
 import { SerialSource } from './sources/serial.js';
 import * as store from './store.js';
-import { diag, labelFor, nodeNames, onNodeName, primeNodeName } from './meshtastic.js';
+import { diag, labelFor, nodeNames, nodeStatus, onNodeName, primeNodeName } from './meshtastic.js';
 import { TrackMap } from './map.js';
-import { distance, bearing, compass, formatDistance, freshness, colourFor, relativeBearing } from './geo.js';
+import { distance, bearing, compass, formatDistance, formatAge, freshness, colourFor, relativeBearing } from './geo.js';
 import { Compass } from './heading.js';
 
 /** @typedef {import('./meshtastic.js').Position} Position */
@@ -430,8 +430,11 @@ function render() {
   const panel = el('dogs');
 
   // Sort by display label so the list reads naturally, not by hex id.
-  const ids = [...tracks.keys()]
-    .filter((id) => (tracks.get(id) || []).length > 0)
+  // Nodes the radio has heard but that carry no position still get a card. A
+  // collar transmitting without a GPS fix is a different problem from one that
+  // has gone silent, and omitting it makes the two look identical.
+  const ids = [...new Set([...tracks.keys(), ...nodeStatus.keys()])]
+    .filter((id) => (tracks.get(id) || []).length > 0 || nodeStatus.has(id))
     .filter((id) => !(hideInfra && roles.get(id) === 'infra'))
     .sort((a, b) => labelFor(a).localeCompare(labelFor(b), undefined, { sensitivity: 'base' }));
 
@@ -450,10 +453,15 @@ function render() {
 
   for (const id of ids) {
     const list = tracks.get(id) || [];
-    const latest = list[list.length - 1];
-    const fresh = freshness(now - latest.ts);
+    const latest = list.length ? list[list.length - 1] : null;
+    const status = nodeStatus.get(id);
 
-    map.update(id, list, fresh.level);
+    // Age from the position when we have one, otherwise from when the node was
+    // last heard at all.
+    const stamp = latest ? latest.ts : (status?.lastHeard || 0);
+    const fresh = freshness(stamp ? now - stamp : Infinity);
+
+    if (latest) map.update(id, list, fresh.level);
 
     let card = cards.get(id);
     if (!card) {
@@ -466,7 +474,8 @@ function render() {
     const role = roles.get(id);
     card.root.className = 'dog ' + fresh.level +
       (id === selectedId ? ' selected' : '') +
-      (role === 'infra' ? ' infra' : '');
+      (role === 'infra' ? ' infra' : '') +
+      (latest ? '' : ' nofix');
     card.role.textContent = role === 'infra' ? 'infra' : 'collar';
     card.role.className = 'role' + (role === 'infra' ? ' infra' : '');
     card.name.textContent = labelFor(id);
@@ -476,27 +485,41 @@ function render() {
     const short = nodeNames.get(id)?.short;
     card.idline.textContent = short ? `${short} · ${id}` : id;
 
-    if (handler) {
-      const d = distance(handler.lat, handler.lon, latest.lat, latest.lon);
-      const b = bearing(handler.lat, handler.lon, latest.lat, latest.lon);
-      card.range.textContent = `${formatDistance(d)} · ${compass(b)} ${Math.round(b)}°`;
+    if (!latest) {
+      // Heard, but no coordinates. Say so in the slot the eye goes to first.
+      card.range.textContent = 'NO GPS FIX';
       card.range.hidden = false;
+      card.coords.textContent = status?.lastHeard
+        ? `radio ok · heard ${formatAge(now - status.lastHeard)}`
+        : 'radio ok · never heard';
+      card.radio.textContent = [
+        status?.snr != null ? `SNR ${status.snr.toFixed(1)}` : null,
+        status?.hops != null ? (status.hops === 0 ? 'direct' : `${status.hops} hops`) : null,
+      ].filter(Boolean).join(' · ');
+      card.fixes.textContent = 'no position yet';
     } else {
-      card.range.hidden = true;
-    }
+      if (handler) {
+        const d = distance(handler.lat, handler.lon, latest.lat, latest.lon);
+        const b = bearing(handler.lat, handler.lon, latest.lat, latest.lon);
+        card.range.textContent = `${formatDistance(d)} · ${compass(b)} ${Math.round(b)}°`;
+        card.range.hidden = false;
+      } else {
+        card.range.hidden = true;
+      }
 
-    card.coords.textContent = `${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}`;
-    card.radio.textContent = [
-      // A node-database entry is the radio's last-known value, not a packet we
-      // heard -- it has no RSSI, and counting it as a delivery would inflate
-      // the range-test numbers.
-      latest.link === 'nodedb' ? 'from node db' : null,
-      latest.rssi !== null ? `RSSI ${latest.rssi}` : null,
-      latest.snr !== null ? `SNR ${latest.snr.toFixed(1)}` : null,
-      latest.hops !== null ? (latest.hops === 0 ? 'direct' : `${latest.hops} hop${latest.hops > 1 ? 's' : ''}`) : null,
-      latest.sats !== null ? `${latest.sats} sats` : null,
-    ].filter(Boolean).join(' · ');
-    card.fixes.textContent = `${list.length} fixes`;
+      card.coords.textContent = `${latest.lat.toFixed(5)}, ${latest.lon.toFixed(5)}`;
+      card.radio.textContent = [
+        // A node-database entry is the radio's last-known value, not a packet we
+        // heard -- it has no RSSI, and counting it as a delivery would inflate
+        // the range-test numbers.
+        latest.link === 'nodedb' ? 'from node db' : null,
+        latest.rssi !== null ? `RSSI ${latest.rssi}` : null,
+        latest.snr !== null ? `SNR ${latest.snr.toFixed(1)}` : null,
+        latest.hops !== null ? (latest.hops === 0 ? 'direct' : `${latest.hops} hop${latest.hops > 1 ? 's' : ''}`) : null,
+        latest.sats !== null ? `${latest.sats} sats` : null,
+      ].filter(Boolean).join(' · ');
+      card.fixes.textContent = `${list.length} fixes`;
+    }
   }
 
   // Drop cards and map layers for devices no longer listed -- either cleared,

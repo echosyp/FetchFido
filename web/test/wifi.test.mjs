@@ -144,5 +144,41 @@ await test('disconnect stops the poll loop', async () => {
   assert.equal(stub.calls.length, after, 'no requests should follow disconnect');
 });
 
+
+console.log('timeout isolation');
+
+await test('a timed-out request does not poison later ones', async () => {
+  // The bug this guards: one shared AbortController per connection meant a
+  // single slow response aborted it permanently, and every subsequent fetch
+  // failed instantly with AbortError until the user reconnected.
+  let call = 0;
+  const fetchImpl = async (url, opts) => {
+    call++;
+    if (call === 3) {
+      // Hang past the timeout, honouring the abort signal like fetch does.
+      await new Promise((_, reject) => {
+        opts.signal.addEventListener('abort', () => {
+          const e = new Error('The operation was aborted.');
+          e.name = 'AbortError';
+          reject(e);
+        });
+      });
+    }
+    return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) };
+  };
+
+  // calls 1 (PUT) and 2 (probe GET) succeed, so connect() resolves; call 3 is
+  // the loop's first poll and times out.
+  const src = new WifiSource('10.0.0.5', fetchImpl, 20, 10);
+  await src.connect();
+  await new Promise((r) => setTimeout(r, 200));
+  const after = call;
+  const status = src.status();   // capture before disconnect(), which sets 'offline'
+  await src.disconnect();
+
+  assert.ok(after > 3, `loop should keep issuing requests after a timeout (reached ${after})`);
+  assert.notEqual(status, 'offline', 'transport should not be dead');
+});
+
 console.log(results.join('\n'));
 console.log(`\n${passed} passed`);

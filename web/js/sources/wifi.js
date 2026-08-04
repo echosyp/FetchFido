@@ -49,11 +49,15 @@ export class WifiSource extends BaseSource {
   /**
    * @param {string} address host, ip, or full URL
    * @param {typeof fetch} [fetchImpl] injectable for tests
+   * @param {number} [timeoutMs] per-request timeout
+   * @param {number} [idleMs] poll back-off
    */
-  constructor(address, fetchImpl) {
+  constructor(address, fetchImpl, timeoutMs = TIMEOUT_MS, idleMs = IDLE_MS) {
     super('WiFi');
     this.base = normaliseBase(address);
     this._fetch = fetchImpl || ((...a) => globalThis.fetch(...a));
+    this._timeoutMs = timeoutMs;
+    this._idleMs = idleMs;
     /** @type {AbortController|null} */
     this._abort = null;
     this._running = false;
@@ -130,7 +134,7 @@ export class WifiSource extends BaseSource {
 
         if (bytes === 0) {
           if (this._status !== 'connected') this._setStatus('connected', this.base);
-          await sleep(IDLE_MS, this._abort?.signal);
+          await sleep(this._idleMs, this._abort?.signal);
         }
         // Otherwise loop straight back round: more frames may be queued.
       } catch (err) {
@@ -139,7 +143,7 @@ export class WifiSource extends BaseSource {
         const msg = err instanceof Error ? err.message : String(err);
         this._setStatus('degraded', `${msg} (${failures})`);
         // Ease off a struggling node rather than hammering it.
-        await sleep(Math.min(IDLE_MS * failures, 15000), this._abort?.signal);
+        await sleep(Math.min(this._idleMs * failures, 15000), this._abort?.signal);
       }
     }
   }
@@ -179,12 +183,24 @@ export class WifiSource extends BaseSource {
    * @returns {Promise<Uint8Array>}
    */
   async _request(method, path, body) {
-    const signal = this._abort?.signal;
-    const timer = setTimeout(() => this._abort?.abort(), TIMEOUT_MS);
+    // A per-request controller. Timing out must not poison the connection:
+    // aborting the shared controller would make every later request fail
+    // instantly with AbortError, leaving the transport permanently degraded
+    // after one slow response. The connection-level signal is chained in so
+    // disconnect() still cancels whatever is in flight.
+    const ctl = new AbortController();
+    const cancel = () => ctl.abort();
+    const outer = this._abort?.signal;
+    if (outer) {
+      if (outer.aborted) ctl.abort();
+      else outer.addEventListener('abort', cancel, { once: true });
+    }
+    const timer = setTimeout(cancel, this._timeoutMs);
+
     try {
       const res = await this._fetch(this.base + path, {
         method,
-        signal,
+        signal: ctl.signal,
         headers: { Accept: 'application/x-protobuf' },
         ...(body ? { body, headers: { 'Content-Type': 'application/x-protobuf' } } : {}),
       });
@@ -192,6 +208,7 @@ export class WifiSource extends BaseSource {
       return new Uint8Array(await res.arrayBuffer());
     } finally {
       clearTimeout(timer);
+      outer?.removeEventListener('abort', cancel);
     }
   }
 }

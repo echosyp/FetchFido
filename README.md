@@ -10,6 +10,12 @@ A security-hardened Go web service for receiving and visualizing GPS data over U
   - JSON format: `{"lat": 40.7128, "lon": -74.0060}`
   - Comma-separated: `40.7128,-74.0060`
   - Space-separated: `40.7128 -74.0060`
+  - Extended tracker payload: `40.7128,-74.0060,1754160183,2.0,12` (see below)
+- **Live Refresh**: The page refreshes when coordinates actually arrive, over a
+  server-sent event stream, rather than on a fixed timer. Traffic that fails to
+  parse does not trigger a refresh.
+- **Most Recent First**: The message list is ordered newest at the top, by the
+  time a fix was *captured* where the device reported it.
 - **TLS 1.3 Support**: Optional HTTPS encryption for secure communication
 - **Health & Info Endpoints**: Standard `/health` and `/info` endpoints for monitoring
 - **Security Hardened**: Runs in a scratch container as non-root user (UID 65534)
@@ -72,9 +78,43 @@ echo "40.7128,-74.0060" | nc -u localhost 9999
 | `/` | GET | Web UI with GPS map and message list |
 | `/health` | GET | Health check endpoint (JSON) |
 | `/info` | GET | Service information (JSON) |
-| `/messages` | GET | All received messages as JSON |
-| `/gps-data.js` | GET | GPS data as JavaScript (template) |
+| `/messages` | GET | All received messages as JSON, most recent first |
+| `/events` | GET | Server-sent event stream; emits `seq` when a message is stored |
+| `/gps-data.js` | GET | GPS data as JavaScript (template), oldest first for the map track |
 | `/static/*` | GET | Static assets (CSS, JS) |
+
+## Tracker payload formats
+
+The tracker sends one UDP datagram per fix, plain ASCII, comma-separated, no
+trailing newline. Both lengths below are accepted, so the device can be switched
+between them — in either direction — without coordinating a deployment. The full
+wire format is documented in `PROTOCOL.md` in the FidoArduino repository.
+
+```
+33.551746,-101.902097                       # 2 fields: lat, lon
+33.551746,-101.902097,1754160183,2.0,12     # 5 fields: + epoch, confidence, satellites
+```
+
+The first two fields are byte-identical in both formats.
+
+| # | Field | Notes |
+|---|-------|-------|
+| 3 | epoch | Unix seconds UTC, when the fix was **taken**, not when it was sent. `0` means the device had no clock; it is shown as unknown, never as 1970-01-01. |
+| 4 | confidence | Estimated horizontal error in metres, lower is better. Reads optimistically in poor conditions, so it is not a radius to draw. |
+| 5 | satellites | Total satellites seen, **not** the number with a usable signal. |
+
+Datagrams are rejected and dropped when they have fewer than 2 fields, contain
+unparseable numbers, report `0,0` or out-of-range coordinates, or carry a
+no-lock confidence value. The device's own `WIFI_TEST` / `CELLULAR_TEST` /
+`STARTUP_TEST` diagnostic strings fail these checks by design.
+
+### Ordering
+
+The device buffers fixes when a send fails and replays up to 10 per cycle
+afterwards, so **datagrams can arrive long after the moment they describe, and
+out of order**. Messages are therefore ordered by capture time (field 3) where
+it is known, falling back to arrival time for legacy payloads and for fixes
+taken while the device had no clock.
 
 ## Configuration
 

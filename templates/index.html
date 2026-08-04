@@ -20,7 +20,7 @@
         <button onclick="location.reload()">Refresh</button>
         <button id="auto-refresh-toggle" class="enabled" onclick="toggleAutoRefresh()">Disable Auto-refresh</button>
         <button onclick="window.location.href='/export/csv'">Export CSV</button>
-        <span id="auto-refresh-status" style="margin-left: 10px; color: #6c757d;">Auto-refresh in 10 seconds</span>
+        <span id="auto-refresh-status" style="margin-left: 10px; color: #6c757d;">Connecting for live updates&hellip;</span>
     </div>
 
     <div class="map-container">
@@ -29,7 +29,7 @@
     </div>
 
     <div class="messages">
-        <h2>Received Messages ({{.MessageCount}})</h2>
+        <h2>Received Messages ({{.MessageCount}}) &mdash; most recent first</h2>
         {{if .Messages}}
             {{range .Messages}}
             <div class="message">
@@ -38,6 +38,13 @@
                 <div><strong>Data:</strong> {{.Data}}</div>
                 {{if .Coordinates.Valid}}
                 <div class="coordinates">GPS: {{.Coordinates.Latitude}}, {{.Coordinates.Longitude}}</div>
+                {{end}}
+                {{if .Coordinates.Extended}}
+                <div class="fix-detail">
+                    Fix taken: {{with .Coordinates.FixTime}}{{.Format "2006-01-02 15:04:05"}} UTC{{else}}unknown (device had no clock){{end}}
+                    &middot; Confidence: {{.Coordinates.Confidence}} m
+                    &middot; Satellites seen: {{.Coordinates.Satellites}}
+                </div>
                 {{end}}
             </div>
             {{end}}

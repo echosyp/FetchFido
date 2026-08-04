@@ -1,36 +1,73 @@
 let map;
 let markers = [];
 let autoRefreshEnabled = true;
-let autoRefreshTimer = null;
+let eventSource = null;
 
-function autoRefresh() {
-    if (autoRefreshEnabled) {
-        autoRefreshTimer = setTimeout(function() {
+function setRefreshStatus(text) {
+    const status = document.getElementById('auto-refresh-status');
+    if (status) {
+        status.textContent = text;
+    }
+}
+
+// The sequence number this page was rendered at. Anything higher means
+// coordinates have been stored since, so what is on screen is out of date.
+function renderedSeq() {
+    return typeof window.gpsSeq === 'number' ? window.gpsSeq : 0;
+}
+
+// Refresh when coordinates actually arrive rather than on a timer. The server
+// pushes the current sequence over /events; EventSource handles reconnection on
+// its own, so a dropped connection recovers without a polling loop.
+function startAutoRefresh() {
+    if (eventSource) {
+        return;
+    }
+
+    eventSource = new EventSource('/events');
+
+    eventSource.addEventListener('open', function() {
+        setRefreshStatus('Waiting for new coordinates');
+    });
+
+    eventSource.addEventListener('seq', function(event) {
+        const seq = parseInt(event.data, 10);
+        if (!isNaN(seq) && seq > renderedSeq()) {
+            setRefreshStatus('New coordinates received, refreshing…');
             location.reload();
-        }, 10000);
+        }
+    });
+
+    eventSource.addEventListener('error', function() {
+        // Fires while EventSource is between retries as well as on a hard
+        // failure; either way the browser is already backing off and retrying.
+        setRefreshStatus('Live updates disconnected, reconnecting…');
+    });
+}
+
+function stopAutoRefresh() {
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
     }
 }
 
 function toggleAutoRefresh() {
     autoRefreshEnabled = !autoRefreshEnabled;
     const button = document.getElementById('auto-refresh-toggle');
-    const status = document.getElementById('auto-refresh-status');
 
     if (autoRefreshEnabled) {
         button.textContent = 'Disable Auto-refresh';
         button.classList.add('enabled');
         button.classList.remove('disabled');
-        status.textContent = 'Auto-refresh in 10 seconds';
-        autoRefresh(); // Start the timer
+        setRefreshStatus('Connecting for live updates…');
+        startAutoRefresh();
     } else {
         button.textContent = 'Enable Auto-refresh';
         button.classList.add('disabled');
         button.classList.remove('enabled');
-        status.textContent = 'Auto-refresh disabled';
-        if (autoRefreshTimer) {
-            clearTimeout(autoRefreshTimer);
-            autoRefreshTimer = null;
-        }
+        setRefreshStatus('Auto-refresh disabled');
+        stopAutoRefresh();
     }
 }
 
@@ -90,14 +127,22 @@ function addMarkersToMap() {
     window.gpsData.forEach((point, index) => {
         const marker = L.marker([point.lat, point.lng]).addTo(map);
 
+        // Only present on the extended payload. fixTime is separately null when
+        // the device had no clock, which is not the same as no reading at all.
+        const extendedDetail = point.extended ? `
+                <p><strong>Fix taken:</strong> ${point.fixTime || 'unknown (device had no clock)'}</p>
+                <p><strong>Confidence:</strong> ${point.confidence} m</p>
+                <p><strong>Satellites seen:</strong> ${point.satellites}</p>
+        ` : '';
+
         // Create popup content
         const popupContent = `
             <div>
                 <h4>GPS Location ${index + 1}</h4>
                 <p><strong>Coordinates:</strong> ${point.lat}, ${point.lng}</p>
-                <p><strong>Timestamp:</strong> ${point.timestamp}</p>
+                <p><strong>Received:</strong> ${point.timestamp}</p>
                 <p><strong>Source:</strong> ${point.source}</p>
-                <p><strong>Raw Data:</strong> ${point.data}</p>
+                <p><strong>Raw Data:</strong> ${point.data}</p>${extendedDetail}
             </div>
         `;
 
@@ -145,5 +190,5 @@ document.addEventListener('DOMContentLoaded', function() {
     waitForLeaflet();
 
     // Start auto-refresh
-    autoRefresh();
+    startAutoRefresh();
 });

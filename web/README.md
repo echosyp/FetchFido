@@ -190,7 +190,16 @@ header as `dup` — that is a direct measure of mesh relay redundancy.
 
 The question this is built to answer (docs/DESIGN.md section 11): at 40 cm off
 the ground, in timber, at what distance does packet delivery fall below usable?
-Walk a node away from the radio, export, and plot delivery against distance.
+Walk a node away from the radio, export, and run:
+
+```bash
+tools/analyze-session.py export.csv --gateway '!9ea0eaac'
+```
+
+That prints delivery ratio, RSSI and SNR binned by distance, detects and
+excludes receiver-side outages, and reports how far 90% delivery held. Pass the
+**receiving gateway** as the reference -- RSSI is measured where the packet was
+heard, so a curve drawn from anywhere else is meaningless.
 
 ## Status
 

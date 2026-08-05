@@ -11,7 +11,7 @@ import { BleSource } from './sources/ble.js';
 import { WifiSource } from './sources/wifi.js';
 import { SerialSource } from './sources/serial.js';
 import * as store from './store.js';
-import { diag, labelFor, nodeNames, nodeStatus, onNodeName, primeNodeName } from './meshtastic.js';
+import { diag, labelFor, nodeNames, nodeStatus, onNodeName, primeNodeName, radioConfig } from './meshtastic.js';
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, formatAge, freshness, colourFor, relativeBearing } from './geo.js';
 import { Compass } from './heading.js';
@@ -568,6 +568,11 @@ function renderDiag() {
     diag.failures ? `${diag.failures} DECODE FAIL` : null,
   ].filter(Boolean);
 
+  if (radioConfig.preset) {
+    parts.push(`${radioConfig.preset}${radioConfig.region ? '/' + radioConfig.region : ''}`);
+    if (radioConfig.hopLimit !== null) parts.push(`gw hops ${radioConfig.hopLimit}`);
+  }
+
   const node = el('diag');
   node.textContent = parts.join(' · ');
   node.className = 'diag' + (diag.failures ? ' bad' : '');
@@ -586,13 +591,18 @@ function renderDiag() {
  */
 async function exportCsv() {
   const rows = await store.allPositions();
-  const header = 'device_id,timestamp_utc,lat,lon,alt_m,speed,heading,sats,rssi_dbm,snr_db,hops,link';
+  // Radio settings are stamped on every row so a session says which
+  // configuration produced it. Comparing range-test runs across presets or hop
+  // limits is meaningless if you cannot tell afterwards which CSV was which.
+  const header = 'device_id,timestamp_utc,lat,lon,alt_m,speed,heading,sats,' +
+    'rssi_dbm,snr_db,hops,hop_start,link,gw_preset,gw_hop_limit,gw_region';
   const body = rows.map((p) => [
     p.deviceId,
     new Date(p.ts * 1000).toISOString(),
     p.lat, p.lon,
     p.alt ?? '', p.speed ?? '', p.heading ?? '', p.sats ?? '',
-    p.rssi ?? '', p.snr ?? '', p.hops ?? '', p.link,
+    p.rssi ?? '', p.snr ?? '', p.hops ?? '', p.hopStart ?? '', p.link,
+    radioConfig.preset ?? '', radioConfig.hopLimit ?? '', radioConfig.region ?? '',
   ].join(','));
 
   const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' });

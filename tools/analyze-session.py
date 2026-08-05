@@ -59,6 +59,10 @@ def load(path, include_nodedb):
                 "snr": float(r["snr_db"]) if r.get("snr_db") else None,
                 "hops": int(r["hops"]) if r.get("hops") not in (None, "") else None,
                 "link": r.get("link", ""),
+                "hop_start": int(r["hop_start"]) if r.get("hop_start") else None,
+                "preset": r.get("gw_preset", ""),
+                "gw_hops": r.get("gw_hop_limit", ""),
+                "region": r.get("gw_region", ""),
             }
             every.append(rec)
             if rec["link"] == "nodedb" and not include_nodedb:
@@ -241,6 +245,18 @@ def main():
     print(f"rows      {len(rows)} used"
           + (f", {skipped} node-db rows excluded" if skipped else ""))
     print(f"devices   {', '.join(sorted(by))}")
+
+    # Radio settings, if the export recorded them.
+    cfg = next((r for r in every if r.get("preset")), None)
+    if cfg:
+        print(f"radio     {cfg['preset']}"
+              + (f" / {cfg['region']}" if cfg["region"] else "")
+              + (f" · gateway hop_limit {cfg['gw_hops']}" if cfg["gw_hops"] else ""))
+    starts = sorted({r["hop_start"] for r in rows if r["hop_start"] is not None})
+    if starts:
+        print(f"senders   hop_start seen: {', '.join(str(x) for x in starts)}"
+              + ("   <-- a high sender hop limit floods the mesh"
+                 if max(starts) > 3 else ""))
 
     ref = None
     if args.origin:

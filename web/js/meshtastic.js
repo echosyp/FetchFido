@@ -76,6 +76,34 @@ const MESH_PACKET = {
   HOP_START: 15,
 };
 
+/** Config oneof field numbers (FromRadio.config). */
+const CONFIG = { LORA: 6 };
+
+/** Config.LoRaConfig field numbers. [verify] */
+const LORA_CONFIG = {
+  USE_PRESET: 1,
+  MODEM_PRESET: 2,
+  BANDWIDTH: 3,
+  SPREAD_FACTOR: 4,
+  CODING_RATE: 5,
+  REGION: 7,
+  HOP_LIMIT: 8,
+  TX_POWER: 10,
+};
+
+/** ModemPreset enum order. [verify] */
+const PRESET_NAMES = [
+  'LongFast', 'LongSlow', 'VeryLongSlow', 'MediumSlow', 'MediumFast',
+  'ShortSlow', 'ShortFast', 'LongModerate', 'ShortTurbo',
+];
+
+/** Region enum order. [verify] */
+const REGION_NAMES = [
+  'UNSET', 'US', 'EU_433', 'EU_868', 'CN', 'JP', 'ANZ', 'KR', 'TW', 'RU',
+  'IN', 'NZ_865', 'TH', 'LORA_24', 'UA_433', 'UA_868', 'MY_433', 'MY_919',
+  'SG_923',
+];
+
 /** Data field numbers. */
 const DATA = {
   PORTNUM: 1,
@@ -106,6 +134,9 @@ const POSITION = {
  * @property {number|null} rssi  Field-test telemetry
  * @property {number|null} snr
  * @property {number|null} hops  Hops traversed, null if unknown
+ * @property {number|null} hopStart  The SENDER's hop limit at transmission --
+ *   a high value makes every node rebroadcast repeatedly, which is a common
+ *   cause of a mesh colliding with itself
  * @property {'mesh'|'nodedb'} link  'nodedb' is a last-known position from the
  *   node database rather than a packet heard live; it may be considerably old
  */
@@ -166,6 +197,73 @@ function hex(b) {
 export const nodeNames = new Map();
 
 const utf8 = new TextDecoder();
+
+/**
+ * The gateway's radio configuration, as reported during the handshake.
+ *
+ * Recorded so an exported session says which settings produced it. Comparing
+ * range-test runs across modem presets or hop limits is meaningless if you
+ * cannot tell afterwards which CSV was which.
+ *
+ * @type {{preset: string|null, region: string|null, hopLimit: number|null,
+ *         txPower: number|null, usePreset: boolean|null,
+ *         bandwidth: number|null, spreadFactor: number|null}}
+ */
+export const radioConfig = {
+  preset: null, region: null, hopLimit: null, txPower: null,
+  usePreset: null, bandwidth: null, spreadFactor: null,
+};
+
+/**
+ * @param {Uint8Array} buf a Config message
+ */
+function readConfig(buf) {
+  new Reader(buf).each((field, wire, r) => {
+    if (field === CONFIG.LORA && wire === WIRE.LEN) {
+      readLoraConfig(r.bytes());
+      return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * @param {Uint8Array} buf a Config.LoRaConfig message
+ */
+function readLoraConfig(buf) {
+  // protobuf omits zero-valued fields, so an absent modem_preset means 0 --
+  // which is LongFast, the default. Seeing the LoRa config at all is enough
+  // to conclude that, so start from 0 rather than leaving it unknown.
+  let preset = 0;
+  /** @type {number|null} */ let region = null;
+  /** @type {number|null} */ let hopLimit = null;
+  /** @type {number|null} */ let txPower = null;
+  /** @type {boolean|null} */ let usePreset = null;
+  /** @type {number|null} */ let bandwidth = null;
+  /** @type {number|null} */ let spreadFactor = null;
+
+  new Reader(buf).each((field, wire, r) => {
+    if (wire !== WIRE.VARINT) return false;
+    switch (field) {
+      case LORA_CONFIG.USE_PRESET: usePreset = r.varint() !== 0; return true;
+      case LORA_CONFIG.MODEM_PRESET: preset = r.varint(); return true;
+      case LORA_CONFIG.BANDWIDTH: bandwidth = r.varint(); return true;
+      case LORA_CONFIG.SPREAD_FACTOR: spreadFactor = r.varint(); return true;
+      case LORA_CONFIG.REGION: region = r.varint(); return true;
+      case LORA_CONFIG.HOP_LIMIT: hopLimit = r.varint(); return true;
+      case LORA_CONFIG.TX_POWER: txPower = r.varint(); return true;
+      default: return false;
+    }
+  });
+
+  radioConfig.preset = PRESET_NAMES[preset] || `preset${preset}`;
+  radioConfig.usePreset = usePreset;
+  radioConfig.hopLimit = hopLimit;
+  radioConfig.txPower = txPower;
+  radioConfig.bandwidth = bandwidth;
+  radioConfig.spreadFactor = spreadFactor;
+  if (region !== null) radioConfig.region = REGION_NAMES[region] || `region${region}`;
+}
 
 /**
  * @typedef {object} NodeStatus
@@ -342,6 +440,7 @@ function readNodeInfo(buf) {
     rssi: null,
     snr,
     hops: hopsAway,
+    hopStart: null,
     link: 'nodedb',
   };
 }
@@ -380,6 +479,14 @@ export function decodeFrames(body) {
   new Reader(body).each((field, wire, r) => {
     if (field === FROM_RADIO.PACKET && wire === WIRE.LEN) {
       packets.push(r.bytes());
+      return true;
+    }
+    if (field === 5 && wire === WIRE.LEN) {   // FromRadio.config
+      try {
+        readConfig(r.bytes());
+      } catch (err) {
+        console.warn('config decode failed', err);
+      }
       return true;
     }
     // The handshake delivers the node database: names AND each node's last
@@ -529,6 +636,7 @@ function decodeMeshPacket(buf) {
     rssi,
     snr,
     hops,
+    hopStart,
     link: 'mesh',
   };
 }

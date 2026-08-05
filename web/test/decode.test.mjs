@@ -333,4 +333,37 @@ test('a live packet counts as heard even when not a position', () => {
   assert.equal(st.hops, 2, 'hop count available from the packet header');
 });
 
+
+test('never invents a last-heard time', () => {
+  // A node-database entry with no last_heard has not been heard by this radio.
+  // Substituting the current time would show a device miles away as seconds
+  // old -- the most dangerous lie this app could tell.
+  const nodeInfo = [
+    ...tag(1, 0), ...varint(0x9e9d82a8),
+    ...lenField(2, buildUser({ id: '!9e9d82a8', long: 'Meshtastic 82a8', short: '82a8' })),
+  ];
+  decodeFrames(new Uint8Array(lenField(4, nodeInfo)));
+  const st = nodeStatus.get('!9e9d82a8');
+  assert.ok(st, 'node should be known');
+  assert.equal(st.lastHeard, 0, 'unknown must stay 0, not become now');
+});
+
+test('a known last-heard is not clobbered by a later unknown one', () => {
+  const withTime = [
+    ...tag(1, 0), ...varint(0x77665544),
+    ...tag(5, 0), ...varint(1_780_000_000),
+    ...lenField(2, buildUser({ id: '!77665544', long: 'Keeper', short: 'keep' })),
+  ];
+  decodeFrames(new Uint8Array(lenField(4, withTime)));
+  assert.equal(nodeStatus.get('!77665544').lastHeard, 1_780_000_000);
+
+  const withoutTime = [
+    ...tag(1, 0), ...varint(0x77665544),
+    ...lenField(2, buildUser({ id: '!77665544', long: 'Keeper', short: 'keep' })),
+  ];
+  decodeFrames(new Uint8Array(lenField(4, withoutTime)));
+  assert.equal(nodeStatus.get('!77665544').lastHeard, 1_780_000_000,
+    'a later entry lacking the field must not erase what we knew');
+});
+
 console.log(`\n${passed} passed`);

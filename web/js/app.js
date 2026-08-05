@@ -487,11 +487,11 @@ function render() {
 
     if (!latest) {
       // Heard, but no coordinates. Say so in the slot the eye goes to first.
-      card.range.textContent = 'NO GPS FIX';
+      card.range.textContent = status?.lastHeard ? 'NO GPS FIX' : 'NOT HEARD';
       card.range.hidden = false;
       card.coords.textContent = status?.lastHeard
         ? `radio ok · heard ${formatAge(now - status.lastHeard)}`
-        : 'radio ok · never heard';
+        : 'NOT HEARD by this radio — known only from the mesh database';
       card.radio.textContent = [
         status?.snr != null ? `SNR ${status.snr.toFixed(1)}` : null,
         status?.hops != null ? (status.hops === 0 ? 'direct' : `${status.hops} hops`) : null,

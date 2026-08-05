@@ -292,11 +292,15 @@ export const nodeStatus = new Map();
  */
 function markHeard(id, patch) {
   const prev = nodeStatus.get(id);
-  nodeStatus.set(id, {
+  const next = {
     lastHeard: 0, snr: null, hops: null, hasPosition: false,
     ...prev,
     ...patch,
-  });
+  };
+  // Never let an unknown time overwrite a known one, and never invent one.
+  // lastHeard 0 means "not heard", which must stay distinguishable from now.
+  if (!patch.lastHeard && prev?.lastHeard) next.lastHeard = prev.lastHeard;
+  nodeStatus.set(id, next);
 }
 
 /** @type {((id: string, name: NodeName) => void)[]} */
@@ -416,8 +420,13 @@ function readNodeInfo(buf) {
 
   const pos = position ? decodePosition(position) : null;
 
+  // A node-database entry with no last_heard has never been heard by this
+  // radio -- a node someone else told it about, or one long out of range.
+  // Substituting the current time here would manufacture recency for a device
+  // that may be miles away, which is the most dangerous lie this app could
+  // tell. Leave it at 0 and let the UI say "not heard".
   markHeard(id, {
-    lastHeard: lastHeard || Math.floor(Date.now() / 1000),
+    lastHeard: lastHeard || 0,
     snr,
     hops: hopsAway,
     hasPosition: !!pos,

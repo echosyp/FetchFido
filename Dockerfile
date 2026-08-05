@@ -39,7 +39,7 @@ COPY --from=builder /app/static /static
 
 # Expose ports
 EXPOSE 8080
-EXPOSE 9999/udp
+EXPOSE 9998/udp
 
 # Run as non-root user
 USER 65534:65534

@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	htmltemplate "html/template"
@@ -352,7 +353,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	}{
 		Messages:     messages,
 		MessageCount: len(messages),
-		ListenPort:   getEnv("LISTEN_PORT", "9999"),
+		ListenPort:   getEnv("LISTEN_PORT", "9998"),
 		WebPort:      getEnv("PORT", "8080"),
 	}
 
@@ -428,7 +429,7 @@ func gpsDataHandler(w http.ResponseWriter, r *http.Request) {
 	}{
 		Messages:     messages,
 		MessageCount: len(messages),
-		ListenPort:   getEnv("LISTEN_PORT", "9999"),
+		ListenPort:   getEnv("LISTEN_PORT", "9998"),
 		WebPort:      getEnv("PORT", "8080"),
 		Seq:          dataStore.Seq(),
 	}
@@ -503,7 +504,7 @@ func exportCSVHandler(w http.ResponseWriter, r *http.Request) {
 
 func udpListener() {
 	listenIP := getEnv("LISTEN_IP", "127.0.0.1")
-	listenPort := getEnv("LISTEN_PORT", "9999")
+	listenPort := getEnv("LISTEN_PORT", "9998")
 	addr, err := net.ResolveUDPAddr("udp", listenIP+":"+listenPort)
 	if err != nil {
 		log.Fatal("Error resolving UDP address:", err)
@@ -529,14 +530,48 @@ func udpListener() {
 		source := clientAddr.String()
 
 		if !dataStore.AddMessage(message, source) {
-			// Log the size only: dropped traffic is frequently binary and
-			// would otherwise write control bytes straight to the terminal.
-			log.Printf("Ignored non-GPS message from %s (%d bytes)", source, n)
+			log.Printf("Ignored non-GPS message from %s (%d bytes): %s",
+				source, n, summarizeDropped(buffer[:n]))
 			continue
 		}
 
 		log.Printf("Received UDP message from %s: %s", source, message)
 	}
+}
+
+// summarizeDropped renders a dropped datagram for the log. Printable payloads
+// are quoted so a malformed fix can actually be read; anything else is shown as
+// hex, because this port also carries binary discovery beacons and writing
+// their control bytes straight to the terminal is what logging the size alone
+// was avoiding. Both forms are capped so one large datagram cannot flood the log.
+func summarizeDropped(payload []byte) string {
+	const maxLogged = 64
+
+	truncated := len(payload) > maxLogged
+	if truncated {
+		payload = payload[:maxLogged]
+	}
+
+	printable := true
+	for _, c := range payload {
+		if c < 0x20 || c > 0x7e {
+			printable = false
+			break
+		}
+	}
+
+	var rendered string
+	if printable {
+		rendered = strconv.Quote(string(payload))
+	} else {
+		rendered = "hex:" + hex.EncodeToString(payload)
+	}
+
+	if truncated {
+		rendered += " (truncated)"
+	}
+
+	return rendered
 }
 
 func getEnv(key, defaultValue string) string {
@@ -549,7 +584,7 @@ func getEnv(key, defaultValue string) string {
 func main() {
 	listenIP := getEnv("LISTEN_IP", "127.0.0.1")
 	port := getEnv("PORT", "8080")
-	listenPort := getEnv("LISTEN_PORT", "9999")
+	listenPort := getEnv("LISTEN_PORT", "9998")
 	tlsCertFile := getEnv("TLS_CERT_FILE", "")
 	tlsKeyFile := getEnv("TLS_KEY_FILE", "")
 

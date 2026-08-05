@@ -43,7 +43,7 @@ go build -o fetchfido .
 
 The application will be available at:
 - Web UI: http://127.0.0.1:8080
-- UDP Listener: 127.0.0.1:9999
+- UDP Listener: 127.0.0.1:9998
 
 ### Run with Container
 
@@ -58,17 +58,17 @@ npm run container:run
 
 ## Sending GPS Data
 
-Send GPS coordinates to the UDP port (default: 9999):
+Send GPS coordinates to the UDP port (default: 9998):
 
 ```bash
 # Using netcat (JSON format)
-echo '{"lat": 40.7128, "lon": -74.0060}' | nc -u localhost 9999
+echo '{"lat": 40.7128, "lon": -74.0060}' | nc -u localhost 9998
 
 # Using Python
 python test_gps.py
 
 # Comma-separated format
-echo "40.7128,-74.0060" | nc -u localhost 9999
+echo "40.7128,-74.0060" | nc -u localhost 9998
 ```
 
 ## API Endpoints
@@ -123,7 +123,7 @@ Environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | HTTP/HTTPS server port |
-| `LISTEN_PORT` | `9999` | UDP listener port |
+| `LISTEN_PORT` | `9998` | UDP listener port |
 | `LISTEN_IP` | `127.0.0.1` | Bind address for all listeners |
 | `APP_VERSION` | `1.0.0` | Application version |
 | `APP_ENV` | `development` | Environment name |

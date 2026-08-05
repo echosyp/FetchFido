@@ -42,7 +42,7 @@ npm run container:run-tls
 - `TLS_CERT_FILE`: Path to TLS certificate file (e.g., `/certs/fullchain.pem`)
 - `TLS_KEY_FILE`: Path to TLS private key file (e.g., `/certs/privkey.pem`)
 - `PORT`: HTTPS port (default: 8080)
-- `LISTEN_PORT`: UDP port for data reception (default: 9999)
+- `LISTEN_PORT`: UDP port for data reception (default: 9998)
 
 ## Container Commands
 

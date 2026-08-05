@@ -5,7 +5,7 @@ import socket
 import time
 import sys
 
-def send_gps_data(host='192.168.120.13', port=9999):
+def send_gps_data(host='192.168.120.13', port=9998):
     """Send GPS coordinates to the FetchFido UDP server"""
     
     # Test coordinates (San Francisco area).
@@ -51,6 +51,6 @@ def send_gps_data(host='192.168.120.13', port=9999):
 if __name__ == "__main__":
     # Allow custom host/port
     host = sys.argv[1] if len(sys.argv) > 1 else '192.168.120.13'
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 9999
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 9998
     
     send_gps_data(host, port)

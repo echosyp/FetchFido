@@ -36,7 +36,13 @@ def parse_ts(s):
 
 
 def load(path, include_nodedb):
-    rows, skipped = [], 0
+    """Returns (analysable rows, skipped count, every row).
+
+    The full set matters for resolving --gateway: a gateway never hears itself
+    over the air, so its own position exists only as a node-database row and
+    would otherwise be filtered away before the lookup.
+    """
+    rows, skipped, every = [], 0, []
     with open(path, newline="") as fh:
         for r in csv.DictReader(fh):
             if not r.get("lat") or not r.get("lon"):
@@ -44,10 +50,7 @@ def load(path, include_nodedb):
             # Node-database entries are the radio's last-known values, not
             # packets heard over the air. They have no RSSI and were never
             # received, so counting them as deliveries inflates the result.
-            if r.get("link") == "nodedb" and not include_nodedb:
-                skipped += 1
-                continue
-            rows.append({
+            rec = {
                 "id": r["device_id"],
                 "ts": parse_ts(r["timestamp_utc"]),
                 "lat": float(r["lat"]),
@@ -56,8 +59,13 @@ def load(path, include_nodedb):
                 "snr": float(r["snr_db"]) if r.get("snr_db") else None,
                 "hops": int(r["hops"]) if r.get("hops") not in (None, "") else None,
                 "link": r.get("link", ""),
-            })
-    return rows, skipped
+            }
+            every.append(rec)
+            if rec["link"] == "nodedb" and not include_nodedb:
+                skipped += 1
+                continue
+            rows.append(rec)
+    return rows, skipped, every
 
 
 def find_outages(fixes, cadence, factor=10):
@@ -87,12 +95,20 @@ def analyse_device(dev, fixes, ref, bin_m, args):
         print("  too few fixes to analyse")
         return
 
-    cadence = args.cadence or st.median(intervals)
+    observed = st.median(intervals)
+    # Only honour --cadence for a device it plausibly describes. Forcing one
+    # device's interval onto another turns its normal gaps into fake outages.
+    if args.cadence and (args.device == dev or observed <= args.cadence * 3):
+        cadence = args.cadence
+        given = True
+    else:
+        cadence = observed
+        given = False
     print(f"  window    {datetime.fromtimestamp(fixes[0]['ts'], timezone.utc):%H:%M:%S}"
           f" .. {datetime.fromtimestamp(fixes[-1]['ts'], timezone.utc):%H:%M:%S} UTC"
           f"  ({span / 3600:.2f} h)")
     print(f"  cadence   {cadence:.0f} s"
-          + ("  (given)" if args.cadence else "  (median interval)"))
+          + ("  (given)" if given else "  (median interval)"))
 
     outages = find_outages(fixes, cadence)
     live = [g for g in intervals if g <= cadence * 10]
@@ -148,9 +164,14 @@ def analyse_device(dev, fixes, ref, bin_m, args):
         mid_lon = (a["lon"] + b["lon"]) / 2
         d = haversine(ref[0], ref[1], mid_lat, mid_lon)
         key = int(d // bin_m)
-        slot = bins.setdefault(key, {"exp": 0, "got": 0, "rssi": [], "snr": []})
+        slot = bins.setdefault(key, {"exp": 0, "got": 0, "rssi": [], "snr": [],
+                                     "direct": 0, "relay": 0})
         slot["exp"] += max(1, round(gap / cadence))
         slot["got"] += 1
+        if b["hops"] == 0:
+            slot["direct"] += 1
+        elif b["hops"]:
+            slot["relay"] += 1
         if b["rssi"] is not None:
             slot["rssi"].append(b["rssi"])
         if b["snr"] is not None:
@@ -168,15 +189,22 @@ def analyse_device(dev, fixes, ref, bin_m, args):
         print(f"    NOTE: {relayed} packets arrived relayed; for those, RSSI"
               " describes the")
         print("          final hop from the relay, not the link from the collar.")
-    print("    distance        delivery   n   RSSI   SNR")
+    print("    distance        delivery  direct relay   RSSI   SNR")
     for key in sorted(bins):
         s = bins[key]
         frac = s["got"] / s["exp"] if s["exp"] else 0
         lo, hi = key * bin_m, (key + 1) * bin_m
         r = f"{st.median(s['rssi']):5.0f}" if s["rssi"] else "    -"
         n = f"{st.median(s['snr']):5.1f}" if s["snr"] else "    -"
-        print(f"    {lo:5.0f}-{hi:5.0f} m   {100 * frac:5.1f}%  {s['got']:3d}  "
+        print(f"    {lo:5.0f}-{hi:5.0f} m   {100 * frac:5.1f}%   {s['direct']:4d}  {s['relay']:4d}  "
               f"{r}  {n}  {bar(frac)}")
+
+    # Once a packet is relayed, RSSI describes the relay's link, not the
+    # collar's -- so direct reception is the only honest measure of raw range.
+    last_direct = [k for k in sorted(bins) if bins[k]["direct"] > 0]
+    if last_direct:
+        print(f"\n  furthest DIRECT reception: {(max(last_direct) + 1) * bin_m:.0f} m"
+              f"  (beyond that, only relayed)")
 
     usable = [k for k in sorted(bins)
               if bins[k]["got"] / max(1, bins[k]["exp"]) >= 0.9]
@@ -201,7 +229,7 @@ def main():
     ap.add_argument("--device", help="analyse only this device id")
     args = ap.parse_args()
 
-    rows, skipped = load(args.csv, args.include_nodedb)
+    rows, skipped, every = load(args.csv, args.include_nodedb)
     if not rows:
         sys.exit("no usable rows")
 
@@ -219,7 +247,8 @@ def main():
         lat, lon = (float(x) for x in args.origin.split(","))
         ref = (lat, lon)
     elif args.gateway:
-        g = by.get(args.gateway)
+        # Look in every row, including node-database ones.
+        g = [r for r in every if r["id"] == args.gateway]
         if not g:
             sys.exit(f"no rows for gateway {args.gateway}")
         ref = (st.median([f["lat"] for f in g]), st.median([f["lon"] for f in g]))

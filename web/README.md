@@ -113,6 +113,43 @@ extracts frames, discards log text, and resynchronises after noise. Discarded
 lines are kept in `SerialSource.log` -- useful when nothing else explains a
 silence.
 
+## Deploying to Cloudflare Pages
+
+Static files, no build step. The whole `web/` directory is the site.
+
+**Settings:** build command *empty*, build output directory `web`.
+
+Two ways in, both avoiding a package manager:
+
+1. **Direct upload** — drag `web/` into the Pages dashboard. Fastest, nothing
+   to push.
+2. **Git integration** — push the branch and point Pages at it; every push
+   redeploys.
+
+`_headers` sets what the meta CSP cannot: `frame-ancestors`, which browsers
+ignore in a `<meta>` tag. It also marks `sw.js` and the app shell
+`no-cache` -- a CDN-cached service worker cannot update itself and would strand
+visitors on whatever build they first loaded.
+
+### The trade HTTPS makes
+
+Hosting over TLS gives a permanent secure context: geolocation, compass,
+service worker, install, Web Bluetooth and Web Serial all work, and an
+installed copy keeps working with no network at all.
+
+**It also breaks the WiFi transport.** An https page cannot fetch a node over
+plain http -- that is mixed content, and no CSP setting overrides it. So:
+
+| | Hosted (https) | Local server (http) |
+|---|---|---|
+| WiFi transport | **no** | yes |
+| BLE / Serial | yes | only on 127.0.0.1 |
+| Geolocation, compass | yes | only on 127.0.0.1 |
+| Install, offline | yes | only on 127.0.0.1 |
+
+Keep the local server for range testing over WiFi; use the hosted copy for
+field work over cable or Bluetooth. They are not redundant.
+
 ## Going off-grid
 
 This is the intended field configuration: phone plus a node on a cable, dogs

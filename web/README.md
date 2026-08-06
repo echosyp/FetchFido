@@ -102,9 +102,12 @@ alone.
 
 ### USB cable transport
 
-Pick **USB cable** and hit Connect; the browser shows a port chooser. Works on
-desktop Chrome and Chrome for Android 150+ (with an OTG cable). Safari does not
-implement Web Serial.
+Pick **USB cable** and hit Connect; the browser shows a port chooser.
+
+**In practice this is desktop-only.** Chrome for Android was observed on
+2026-08-05 to be unable to reach a Heltec V3 over USB, despite compatibility
+tables listing Android support. Safari does not implement Web Serial at all.
+On a phone, use Bluetooth instead -- it is verified and works.
 
 Unplugging is handled: the app watches `navigator.serial` connect and
 disconnect events, remembers which device you chose, and reopens it

@@ -19,15 +19,14 @@
  * HTTPS build: framing, want_config over the stream protocol, and decode all
  * worked on first contact.
  *
- * Still unconfirmed: everything in the BLE block below.
+ * BLE confirmed 2026-08-05 from the hosted PWA: service UUID, all three
+ * characteristics, and the notify-then-drain pattern all worked. Every
+ * transport is now verified against real hardware.
  */
 
 import { Reader, WIRE, putVarint, putField } from './protobuf.js';
 
-/**
- * Meshtastic BLE GATT service and characteristics.
- * [verify] -- the BLE path has not yet been run against hardware.
- */
+/** Meshtastic BLE GATT service and characteristics. Confirmed against hardware. */
 export const BLE = {
   SERVICE: '6ba1b218-15a8-461f-9fa8-5dcae273eafd',
   TO_RADIO: 'f75c76d2-129e-4dad-a1dd-7866124401e7',

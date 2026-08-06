@@ -2,6 +2,12 @@
 /**
  * Web Bluetooth transport to a Meshtastic node.
  *
+ * Verified 2026-08-05 from the hosted PWA against a real node.
+ *
+ * This is the load-bearing transport on mobile: Web Serial does not reach a
+ * node on Android in practice, and the WiFi transport is blocked from an https
+ * page by mixed content. Off-grid on a phone, this is the path.
+ *
  * Platform note: Web Bluetooth exists in Chrome on Android and desktop, and
  * NOT in Safari on iOS. iOS users need the WiFi transport instead
  * (docs/DESIGN.md section 5.1). Requires a secure context -- https, or

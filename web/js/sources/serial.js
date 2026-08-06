@@ -12,6 +12,8 @@
  *
  * Unlike the HTTP transport, the serial protocol is framed and the device
  * interleaves plain-text logs on the same port; see js/framing.js.
+ *
+ * Verified 2026-08-05 against a real node, driven from the hosted HTTPS build.
  */
 
 import { decodeFrames, wantConfig } from '../meshtastic.js';

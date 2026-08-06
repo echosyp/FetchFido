@@ -2,6 +2,8 @@
 /**
  * Meshtastic stream framing.
  *
+ * Confirmed against real hardware 2026-08-05.
+ *
  * The HTTP transport returns bare protobuf, but the serial (and TCP) stream
  * protocol wraps each FromRadio message in a four-byte header:
  *

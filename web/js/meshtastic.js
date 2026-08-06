@@ -15,8 +15,11 @@
  * heading produced 163 distinct values all within 0-358.58 degrees, and speed
  * whole numbers 0-5. Every field in the position path is now verified.
  *
- * Still unconfirmed: everything in the BLE block below, and the serial framing
- * -- only the HTTP path has been exercised against hardware.
+ * Serial confirmed 2026-08-05 against real hardware, driven from the hosted
+ * HTTPS build: framing, want_config over the stream protocol, and decode all
+ * worked on first contact.
+ *
+ * Still unconfirmed: everything in the BLE block below.
  */
 
 import { Reader, WIRE, putVarint, putField } from './protobuf.js';

@@ -251,3 +251,6 @@ main {
   font-size: 17px;
   letter-spacing: 0.04em;
 }
+
+.awake { font-size: 11px; color: var(--muted); }
+.awake.on { color: var(--ok); }

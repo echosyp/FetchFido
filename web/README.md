@@ -159,6 +159,24 @@ plain http -- that is mixed content, and no CSP setting overrides it. So:
 Keep the local server for range testing over WiFi; use the hosted copy for
 field work over cable or Bluetooth. They are not redundant.
 
+## Surviving a walk
+
+Two things are handled that only matter once the phone is in a pocket:
+
+**Bluetooth reconnects itself.** A dropped GATT link retries with back-off
+(1s, 2s, 4s ... 30s) and keeps retrying, so walking back into range restores
+the link with no interaction. The device permission lives on the object we
+hold, so no chooser appears. Without this a momentary dropout becomes a silent
+hole in the track -- easily mistaken for a radio range limit.
+
+**The screen is kept awake while connected**, and only while connected. A
+locked screen suspends timers and can drop work entirely, producing the same
+misleading gap. The lock is re-taken when the page becomes visible again,
+since browsers release it on hide.
+
+While the page *is* hidden, idle repainting drops to once every 30 seconds.
+Incoming positions still render immediately -- only the age-ticking slows.
+
 ## Going off-grid
 
 This is the intended field configuration: phone plus a node on a cable, dogs

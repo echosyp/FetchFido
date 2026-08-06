@@ -15,6 +15,7 @@ import { diag, labelFor, nodeNames, nodeStatus, onNodeName, primeNodeName, radio
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, formatAge, freshness, colourFor, relativeBearing } from './geo.js';
 import { Compass } from './heading.js';
+import { Awake } from './awake.js';
 
 /** @typedef {import('./meshtastic.js').Position} Position */
 
@@ -41,6 +42,10 @@ const roles = new Map();
 let hideInfra = false;
 
 const heading = new Compass();
+const awake = new Awake();
+
+/** Render timer, throttled while the page is hidden. */
+let renderTimer = /** @type {ReturnType<typeof setInterval>|null} */ (null);
 
 /** Field-test counters (docs/DESIGN.md section 11). */
 const stats = { received: 0, stored: 0, duplicates: 0 };
@@ -89,6 +94,11 @@ function makeSource(kind, address) {
     : new BleSource();
 
   s.onStatus((state, detail) => {
+    // Keep the screen alive only while a radio is attached, so the app never
+    // burns battery holding a lock for nothing.
+    if (state === 'connected') void awake.request();
+    else if (state === 'offline') void awake.release();
+
     const badge = el('status');
     badge.textContent = detail ? `${state} — ${detail}` : state;
     badge.className = 'status ' + state;
@@ -210,6 +220,13 @@ async function boot() {
 
   heading.onChange(renderNav);
 
+  awake.onChange((held, why) => {
+    const e = el('awake');
+    e.textContent = held ? 'screen kept awake'
+      : (why && why !== 'released' ? `no wake lock: ${why}` : '');
+    e.className = 'awake' + (held ? ' on' : '');
+  });
+
   onNodeName((id, name) => {
     void store.putDevice(id, name).catch((err) => console.warn('name save failed', err));
     render();
@@ -229,8 +246,24 @@ async function boot() {
 
   watchHandler();
   registerServiceWorker();
-  setInterval(render, 1000); // ages must tick even with no new packets
+  startRenderLoop();
+  document.addEventListener('visibilitychange', startRenderLoop);
   render();
+}
+
+/**
+ * Ages must tick even with no new packets, but only while someone can see
+ * them. A hidden tab re-rendering every second is pure battery cost, and on a
+ * phone in a pocket that runs for hours.
+ *
+ * Incoming positions still render immediately regardless -- onPosition calls
+ * render() directly, so nothing is delayed, only idle repainting.
+ */
+function startRenderLoop() {
+  if (renderTimer) clearInterval(renderTimer);
+  const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  renderTimer = setInterval(render, hidden ? 30000 : 1000);
+  if (!hidden) render();
 }
 
 /** Registered here rather than inline in the HTML, which the CSP forbids. */

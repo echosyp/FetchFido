@@ -313,6 +313,40 @@ func (ds *DataStore) AddMessage(data, source string) bool {
 	return true
 }
 
+// Clear discards every stored message. The store is memory-only, so this is
+// irreversible - CSV export is the only way to keep the data. seq still advances
+// rather than resetting, so other browsers watching the event stream notice the
+// change and refresh instead of sitting on a list that no longer exists.
+func (ds *DataStore) Clear() int {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+
+	discarded := len(ds.messages)
+	if discarded == 0 {
+		return 0
+	}
+
+	ds.messages = ds.messages[:0]
+	ds.seq++
+
+	for ch := range ds.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+
+	return discarded
+}
+
+// MaxSize reports the ring-buffer capacity, so the UI can offer display sizes
+// that make sense against it.
+func (ds *DataStore) MaxSize() int {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+	return ds.maxSize
+}
+
 // GetMessages returns the stored messages oldest first, ordered by capture time
 // where the device supplied one. Replayed fixes arrive out of order, so this is
 // not the same as the order they were received in. The sort is stable, which
@@ -346,6 +380,94 @@ func (ds *DataStore) GetMessagesNewestFirst() []ReceivedMessage {
 
 var dataStore *DataStore
 
+// parseLimit reads the ?limit= display cap. Absent, "all", or anything that is
+// not a positive number means no limit: show everything stored. The limit only
+// affects what is rendered - nothing is evicted, so widening it again brings the
+// older fixes straight back.
+func parseLimit(r *http.Request) int {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" || raw == "all" {
+		return 0
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+
+	return n
+}
+
+// limitNewest trims a newest-first slice to its leading n entries.
+func limitNewest(messages []ReceivedMessage, n int) []ReceivedMessage {
+	if n <= 0 || n >= len(messages) {
+		return messages
+	}
+	return messages[:n]
+}
+
+// limitOldest trims an oldest-first slice to its trailing n entries, which are
+// the most recent ones. The map keeps chronological order because its polyline
+// is a track, so the newest entries have to be taken from the end.
+func limitOldest(messages []ReceivedMessage, n int) []ReceivedMessage {
+	if n <= 0 || n >= len(messages) {
+		return messages
+	}
+	return messages[len(messages)-n:]
+}
+
+// limitChoices offers round display sizes below the buffer capacity. Anything at
+// or above capacity would be indistinguishable from "All", so it is left out.
+//
+// A current limit that is not one of the round numbers - typed straight into the
+// URL - is folded in. Without that the selector would sit on "All" while the
+// page rendered a truncated list, which is worse than offering an odd number.
+func limitChoices(maxSize, current int) []int {
+	candidates := []int{10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
+
+	choices := make([]int, 0, len(candidates)+1)
+	for _, c := range candidates {
+		if c < maxSize {
+			choices = append(choices, c)
+		}
+	}
+
+	if current > 0 {
+		present := false
+		for _, c := range choices {
+			if c == current {
+				present = true
+				break
+			}
+		}
+		if !present {
+			choices = append(choices, current)
+			sort.Ints(choices)
+		}
+	}
+
+	return choices
+}
+
+// maxMessages reads the ring-buffer capacity from the environment. It bounds
+// memory directly: every accepted fix is retained until evicted.
+func maxMessages() int {
+	const fallback = 100
+
+	raw := getEnv("MAX_MESSAGES", "")
+	if raw == "" {
+		return fallback
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		log.Printf("Invalid MAX_MESSAGES %q, using %d", raw, fallback)
+		return fallback
+	}
+
+	return n
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -378,16 +500,26 @@ var jsTemplates *texttemplate.Template
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 
-	messages := dataStore.GetMessagesNewestFirst()
+	stored := dataStore.GetMessagesNewestFirst()
+	limit := parseLimit(r)
+	messages := limitNewest(stored, limit)
 
 	data := struct {
 		Messages     []ReceivedMessage
 		MessageCount int
+		StoredCount  int
+		Limit        int
+		LimitChoices []int
+		MaxSize      int
 		ListenPort   string
 		WebPort      string
 	}{
 		Messages:     messages,
 		MessageCount: len(messages),
+		StoredCount:  len(stored),
+		Limit:        limit,
+		LimitChoices: limitChoices(dataStore.MaxSize(), limit),
+		MaxSize:      dataStore.MaxSize(),
 		ListenPort:   getEnv("LISTEN_PORT", "9998"),
 		WebPort:      getEnv("PORT", "8080"),
 	}
@@ -400,8 +532,25 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 func messagesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	messages := dataStore.GetMessagesNewestFirst()
+	messages := limitNewest(dataStore.GetMessagesNewestFirst(), parseLimit(r))
 	json.NewEncoder(w).Encode(messages)
+}
+
+// clearHandler discards every stored message. POST only: a GET would let a
+// crawler, a prefetch or a stray link destroy the buffer, and the store is
+// memory-only so there is nothing to recover it from.
+func clearHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	discarded := dataStore.Clear()
+	log.Printf("Cleared %d stored message(s) on request from %s", discarded, r.RemoteAddr)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"cleared": discarded})
 }
 
 // eventsHandler streams a server-sent event whenever a message is stored, so the
@@ -452,8 +601,9 @@ func gpsDataHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
 	// Oldest first: this feeds the map, where the polyline is a track and has to
-	// be drawn in the order the positions were captured.
-	messages := dataStore.GetMessages()
+	// be drawn in the order the positions were captured. The display limit keeps
+	// the newest n, so the map and the message list show the same fixes.
+	messages := limitOldest(dataStore.GetMessages(), parseLimit(r))
 
 	data := struct {
 		Messages     []ReceivedMessage
@@ -661,7 +811,9 @@ func main() {
 		log.Fatal("Error loading JS templates:", err)
 	}
 
-	dataStore = NewDataStore(100)
+	capacity := maxMessages()
+	dataStore = NewDataStore(capacity)
+	log.Printf("Retaining up to %d messages", capacity)
 
 	go udpListener()
 
@@ -671,6 +823,7 @@ func main() {
 	http.HandleFunc("/info", infoHandler)
 	http.HandleFunc("/messages", messagesHandler)
 	http.HandleFunc("/events", eventsHandler)
+	http.HandleFunc("/clear", clearHandler)
 	http.HandleFunc("/gps-data.js", gpsDataHandler)
 	http.HandleFunc("/export/csv", exportCSVHandler)
 

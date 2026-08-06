@@ -20,6 +20,16 @@
         <button onclick="location.reload()">Refresh</button>
         <button id="auto-refresh-toggle" class="enabled" onclick="toggleAutoRefresh()">Disable Auto-refresh</button>
         <button onclick="window.location.href='/export/csv'">Export CSV</button>
+        <button id="clear-button" class="danger" onclick="clearMessages()">Clear</button>
+
+        <label for="limit-select" style="margin-left: 10px;">Show</label>
+        <select id="limit-select" onchange="changeLimit(this)">
+            <option value="all" {{if eq .Limit 0}}selected{{end}}>All</option>
+            {{range .LimitChoices}}
+            <option value="{{.}}" {{if eq $.Limit .}}selected{{end}}>{{.}}</option>
+            {{end}}
+        </select>
+
         <span id="auto-refresh-status" style="margin-left: 10px; color: #6c757d;">Connecting for live updates&hellip;</span>
     </div>
 
@@ -29,7 +39,16 @@
     </div>
 
     <div class="messages">
-        <h2>Received Messages ({{.MessageCount}}) &mdash; most recent first</h2>
+        <h2>
+            Received Messages
+            {{if lt .MessageCount .StoredCount}}
+                ({{.MessageCount}} of {{.StoredCount}} shown)
+            {{else}}
+                ({{.MessageCount}})
+            {{end}}
+            &mdash; most recent first
+        </h2>
+        <p class="capacity-note">Retaining up to {{.MaxSize}} messages (set <code>MAX_MESSAGES</code> to change).</p>
         {{if .Messages}}
             {{range .Messages}}
             <div class="message">
@@ -53,7 +72,8 @@
         {{end}}
     </div>
 
-    <script src="gps-data.js"></script>
+    <!-- The limit rides along so the map plots the same fixes the list shows. -->
+    <script src="/gps-data.js{{if .Limit}}?limit={{.Limit}}{{end}}"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

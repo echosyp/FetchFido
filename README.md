@@ -16,6 +16,11 @@ A security-hardened Go web service for receiving and visualizing GPS data over U
   parse does not trigger a refresh.
 - **Most Recent First**: The message list is ordered newest at the top, by the
   time a fix was *captured* where the device reported it.
+- **Adjustable Display Size**: A selector chooses how many of the retained fixes
+  to show, carried in the URL as `?limit=N` so it survives the live refresh. The
+  limit only affects rendering — widening it again brings older fixes back.
+- **Clear**: A button discards the stored fixes. The store is memory-only, so
+  this cannot be undone; export CSV first if the data matters.
 - **TLS 1.3 Support**: Optional HTTPS encryption for secure communication
 - **Health & Info Endpoints**: Standard `/health` and `/info` endpoints for monitoring
 - **Security Hardened**: Runs in a scratch container as non-root user (UID 65534)
@@ -79,7 +84,8 @@ echo "40.7128,-74.0060" | nc -u localhost 9998
 | `/health` | GET | Health check endpoint (JSON) |
 | `/info` | GET | Service information (JSON) |
 | `/messages` | GET | All received messages as JSON, most recent first |
-| `/events` | GET | Server-sent event stream; emits `seq` when a message is stored |
+| `/clear` | POST | Discards every stored message. POST only, so a prefetch or crawler cannot wipe the buffer |
+| `/events` | GET | Server-sent event stream; emits `seq` when a message is stored or cleared |
 | `/gps-data.js` | GET | GPS data as JavaScript (template), oldest first for the map track |
 | `/static/*` | GET | Static assets (CSS, JS) |
 
@@ -124,7 +130,8 @@ Environment variables:
 |----------|---------|-------------|
 | `PORT` | `8080` | HTTP/HTTPS server port |
 | `LISTEN_PORT` | `9998` | UDP listener port |
-| `LISTEN_IP` | `127.0.0.1` | Bind address for all listeners |
+| `LISTEN_IP` | `0.0.0.0` | Bind address for all listeners |
+| `MAX_MESSAGES` | `100` | How many messages the in-memory ring buffer retains. Bounds memory directly; invalid or non-positive values fall back to the default |
 | `APP_VERSION` | `1.0.0` | Application version |
 | `APP_ENV` | `development` | Environment name |
 | `TLS_CERT_FILE` | - | Path to TLS certificate (enables HTTPS) |

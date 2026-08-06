@@ -71,6 +71,48 @@ function toggleAutoRefresh() {
     }
 }
 
+// The store is in memory only, so a clear cannot be undone and CSV export is the
+// only way the data survives. Worth one confirmation step that says so.
+function clearMessages() {
+    const warning = 'Clear all stored coordinates?\n\n' +
+        'The store is in memory only, so this cannot be undone. ' +
+        'Export CSV first if you need to keep the data.';
+
+    if (!confirm(warning)) {
+        return;
+    }
+
+    fetch('/clear', {method: 'POST'})
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+            return response.json();
+        })
+        .then(function(result) {
+            console.log('Cleared', result.cleared, 'message(s)');
+            location.reload();
+        })
+        .catch(function(error) {
+            alert('Clear failed: ' + error.message);
+        });
+}
+
+// The limit rides in the query string rather than localStorage so that
+// location.reload() - which is how the live-refresh stream repaints the page -
+// carries it across automatically.
+function changeLimit(select) {
+    const url = new URL(window.location.href);
+
+    if (select.value === 'all') {
+        url.searchParams.delete('limit');
+    } else {
+        url.searchParams.set('limit', select.value);
+    }
+
+    window.location.href = url.toString();
+}
+
 function initMap() {
     try {
         console.log('Initializing map...');

@@ -125,6 +125,17 @@ async function boot() {
       : kind === 'serial' ? new SerialSource()
       : null;
 
+    // The hosted copy is served over https and cannot reach a node over plain
+    // http -- mixed content, unfixable from here. Say so when the transport is
+    // picked rather than after a failed connect.
+    if (kind === 'wifi' && location.protocol === 'https:') {
+      el('status').textContent =
+        'WiFi needs the http copy — https cannot reach an http node';
+      el('status').className = 'status offline';
+      btn.disabled = true;
+      return;
+    }
+
     if (probe && !probe.available()) {
       const why = window.isSecureContext
         ? `${probe.name} unsupported in this browser`

@@ -17,6 +17,10 @@ import (
 	"sync"
 	texttemplate "text/template"
 	"time"
+
+	// The runtime image is FROM scratch, so there is no /usr/share/zoneinfo.
+	// This embeds the database in the binary (~450 KB) so DISPLAY_TZ works.
+	_ "time/tzdata"
 )
 
 type HealthResponse struct {
@@ -63,11 +67,42 @@ type GPSCoordinate struct {
 	Satellites int `json:"satellites,omitempty"`
 }
 
+// displayLoc is the zone timestamps are rendered in. UTC by default, which is
+// correct but reads as six hours wrong to someone in Central time who is not
+// expecting it - so the rendered form always names the zone.
+var displayLoc = time.UTC
+
+func initDisplayTZ() {
+	name := getEnv("DISPLAY_TZ", "UTC")
+
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Printf("Unknown DISPLAY_TZ %q, falling back to UTC: %v", name, err)
+		return
+	}
+
+	displayLoc = loc
+	log.Printf("Timestamps displayed in %s", name)
+}
+
+// Rendered wherever a timestamp is shown. The zone abbreviation is not
+// decoration: without it a reader has no way to know whether 02:12:40 is their
+// local time or UTC, and both are plausible.
+func formatTS(t time.Time) string {
+	return t.In(displayLoc).Format("2006-01-02 15:04:05 MST")
+}
+
 type ReceivedMessage struct {
 	Timestamp   time.Time     `json:"timestamp"`
 	Data        string        `json:"data"`
 	Source      string        `json:"source"`
 	Coordinates GPSCoordinate `json:"coordinates"`
+}
+
+// LocalTime is what the templates call, so the zone is applied in one place
+// rather than repeated as a format string at every call site.
+func (m ReceivedMessage) LocalTime() string {
+	return formatTS(m.Timestamp)
 }
 
 // EffectiveTime is the time a message should be ordered by: the capture time
@@ -478,7 +513,7 @@ func exportCSVHandler(w http.ResponseWriter, r *http.Request) {
 		satellites := ""
 
 		if msg.Coordinates.FixTime != nil {
-			fixTime = msg.Coordinates.FixTime.Format("2006-01-02 15:04:05")
+			fixTime = formatTS(*msg.Coordinates.FixTime)
 		}
 		if msg.Coordinates.Extended {
 			confidence = strconv.FormatFloat(msg.Coordinates.Confidence, 'f', -1, 64)
@@ -486,7 +521,7 @@ func exportCSVHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err := writer.Write([]string{
-			msg.Timestamp.Format("2006-01-02 15:04:05"),
+			formatTS(msg.Timestamp),
 			msg.Source,
 			msg.Data,
 			lat,
@@ -503,8 +538,21 @@ func exportCSVHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func udpListener() {
-	listenIP := getEnv("LISTEN_IP", "127.0.0.1")
+	// 0.0.0.0, not loopback. Binding 127.0.0.1 inside a container works only
+	// because rootless podman happens to proxy forwarded traffic to loopback;
+	// under rootful podman, a bridge network or Kubernetes the listener would
+	// come up cleanly, serve the dashboard, and silently receive nothing.
+	listenIP := getEnv("LISTEN_IP", "0.0.0.0")
 	listenPort := getEnv("LISTEN_PORT", "9998")
+
+	// Acknowledge accepted datagrams so the sender can tell delivery from
+	// "the datagram left the building". UDP reports success as soon as the
+	// packet is handed to the stack, which is why a wrong port, a dead server
+	// or a broken NAT loopback all look identical from the device.
+	//
+	// Off unless enabled, so a tracker configured to require ACKs is never
+	// surprised by a server that predates them.
+	ackEnabled := getEnv("ACK_ENABLED", "false") == "true"
 	addr, err := net.ResolveUDPAddr("udp", listenIP+":"+listenPort)
 	if err != nil {
 		log.Fatal("Error resolving UDP address:", err)
@@ -516,7 +564,7 @@ func udpListener() {
 	}
 	defer conn.Close()
 
-	log.Printf("UDP listener started on port %s", listenPort)
+	log.Printf("UDP listener started on %s:%s (ack=%v)", listenIP, listenPort, ackEnabled)
 
 	buffer := make([]byte, 1024)
 	for {
@@ -536,6 +584,16 @@ func udpListener() {
 		}
 
 		log.Printf("Received UDP message from %s: %s", source, message)
+
+		// Only accepted messages are acknowledged. A sender treating silence
+		// as failure will then retry a fix that was rejected, which is the
+		// behaviour worth having: it is stored or it is retried, never
+		// silently dropped.
+		if ackEnabled {
+			if _, err := conn.WriteToUDP([]byte("ACK"), clientAddr); err != nil {
+				log.Printf("Failed to ACK %s: %v", source, err)
+			}
+		}
 	}
 }
 
@@ -582,7 +640,11 @@ func getEnv(key, defaultValue string) string {
 }
 
 func main() {
-	listenIP := getEnv("LISTEN_IP", "127.0.0.1")
+	initDisplayTZ()
+
+	// Matches udpListener(): loopback inside a container only works by
+	// accident of how rootless podman forwards ports.
+	listenIP := getEnv("LISTEN_IP", "0.0.0.0")
 	port := getEnv("PORT", "8080")
 	listenPort := getEnv("LISTEN_PORT", "9998")
 	tlsCertFile := getEnv("TLS_CERT_FILE", "")

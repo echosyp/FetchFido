@@ -18,7 +18,7 @@ window.gpsData = [
     {
         lat: {{.Coordinates.Latitude}},
         lng: {{.Coordinates.Longitude}},
-        timestamp: "{{.Timestamp.Format "2006-01-02 15:04:05"}}",
+        timestamp: "{{.LocalTime}}",
         source: {{printf "%q" .Source}},
         data: {{printf "%q" .Data}},
         extended: {{.Coordinates.Extended}},

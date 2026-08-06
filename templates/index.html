@@ -33,7 +33,7 @@
         {{if .Messages}}
             {{range .Messages}}
             <div class="message">
-                <div class="timestamp">{{.Timestamp.Format "2006-01-02 15:04:05"}}</div>
+                <div class="timestamp">{{.LocalTime}}</div>
                 <div class="source">From: {{.Source}}</div>
                 <div><strong>Data:</strong> {{.Data}}</div>
                 {{if .Coordinates.Valid}}

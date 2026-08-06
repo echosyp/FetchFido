@@ -23,9 +23,36 @@ import { BaseSource } from './base.js';
 /** Meshtastic's serial API runs at this rate. Ignored by native-USB boards. */
 const BAUD = 115200;
 
+/**
+ * Pick a previously granted port matching a remembered device.
+ *
+ * Exported for testing: replug recovery hinges on this, and it is the only
+ * part of the serial path that can be exercised without hardware.
+ *
+ * @param {{getInfo: () => {usbVendorId?: number, usbProductId?: number}}[]} ports
+ * @param {{vid?: number, pid?: number}|null} desired
+ * @returns {any}
+ */
+export function matchPort(ports, desired) {
+  if (!ports || ports.length === 0) return null;
+  if (!desired || desired.vid === undefined) return ports[0];
+  const exact = ports.find((p) => {
+    const i = p.getInfo();
+    return i.usbVendorId === desired.vid && i.usbProductId === desired.pid;
+  });
+  // Fall back to the only granted port rather than refusing to reconnect --
+  // a lone candidate is almost certainly the right one.
+  return exact || (ports.length === 1 ? ports[0] : null);
+}
+
 export class SerialSource extends BaseSource {
   constructor() {
     super('Serial');
+    /** User intent, as opposed to current state: survives an unplug. */
+    this._wantConnected = false;
+    /** @type {{vid?: number, pid?: number}|null} */
+    this._desired = null;
+    this._watching = false;
     /** @type {SerialPort|null} */
     this._port = null;
     /** @type {ReadableStreamDefaultReader<Uint8Array>|null} */
@@ -39,21 +66,86 @@ export class SerialSource extends BaseSource {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
   }
 
+  /**
+   * Watch for the cable being pulled or reinserted.
+   *
+   * Registered once. Without this, a replug leaves the app idle until someone
+   * notices and re-picks the device from a chooser -- which is exactly the
+   * wrong thing to require of a handler mid-walk.
+   */
+  _watch() {
+    if (this._watching || !this.available()) return;
+    this._watching = true;
+
+    navigator.serial.addEventListener('disconnect', (e) => {
+      if (this._port && e.target !== this._port) return;
+      void this._cleanup();
+      if (this._wantConnected) {
+        this._setStatus('degraded', 'cable unplugged — will reconnect');
+      } else {
+        this._setStatus('offline');
+      }
+    });
+
+    navigator.serial.addEventListener('connect', () => {
+      // Only resume if the user had not deliberately disconnected.
+      if (this._wantConnected && !this._port) void this.resume();
+    });
+  }
+
+  /**
+   * Reopen a previously granted port with no user gesture.
+   * @returns {Promise<boolean>} whether a port was reopened
+   */
+  async resume() {
+    if (!this.available() || this._port) return false;
+    this._watch();
+    this._wantConnected = true;
+    const port = matchPort(await navigator.serial.getPorts(), this._desired);
+    if (!port) return false;
+    try {
+      await this._open(port);
+      return true;
+    } catch (err) {
+      this._setStatus('degraded', err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
   /** Must be called from a user gesture, or the port chooser will not open. */
   async connect() {
     if (!this.available()) {
       throw new Error('Web Serial unavailable (needs Chrome; not supported on iOS)');
     }
 
+    this._watch();
+    this._wantConnected = true;
     this._setStatus('connecting');
     try {
       // Deliberately unfiltered: Meshtastic boards ship with several different
       // USB bridges (CP2102, CH340, native nRF52/ESP32-S3 CDC), and a filter
       // that misses one hides the device from the chooser entirely.
-      this._port = await navigator.serial.requestPort();
-      await this._port.open({ baudRate: BAUD });
+      const port = await navigator.serial.requestPort();
+      const info = port.getInfo?.() || {};
+      this._desired = { vid: info.usbVendorId, pid: info.usbProductId };
+      await this._open(port);
+    } catch (err) {
+      this._wantConnected = false;
+      this._setStatus('offline', err instanceof Error ? err.message : String(err));
+      await this._cleanup();
+      throw err;
+    }
+  }
 
-      const framer = new StreamFramer(
+  /**
+   * Open a port and start reading. Shared by connect() and resume().
+   * @param {SerialPort} port
+   */
+  async _open(port) {
+    this._port = port;
+    await this._port.open({ baudRate: BAUD });
+
+    const framer = new StreamFramer(
         (payload) => {
           try {
             for (const pos of decodeFrames(payload)) this._emit(pos);
@@ -67,21 +159,16 @@ export class SerialSource extends BaseSource {
         }
       );
 
-      this._running = true;
-      this._setStatus('connected', portLabel(this._port));
+    this._running = true;
+    this._setStatus('connected', portLabel(this._port));
 
-      // Start reading before the handshake, so the reply cannot be missed.
-      void this._read(framer);
-      await this._send(wantConfig(Math.floor(Math.random() * 0xffffffff)));
-    } catch (err) {
-      this._running = false;
-      this._setStatus('offline', err instanceof Error ? err.message : String(err));
-      await this._cleanup();
-      throw err;
-    }
+    // Start reading before the handshake, so the reply cannot be missed.
+    void this._read(framer);
+    await this._send(wantConfig(Math.floor(Math.random() * 0xffffffff)));
   }
 
   async disconnect() {
+    this._wantConnected = false;
     this._running = false;
     await this._cleanup();
     this._setStatus('offline');

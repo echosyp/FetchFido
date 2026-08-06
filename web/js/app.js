@@ -215,6 +215,18 @@ async function boot() {
     render();
   });
 
+  // If serial was the last transport used, try to reopen the already-granted
+  // port without a chooser. Requires no user gesture, so a reload or an
+  // accidental unplug does not strand the user mid-walk.
+  if (prefs.transport === 'serial') {
+    const s = new SerialSource();
+    if (s.available()) {
+      source = makeSource('serial', '');
+      const resumed = await /** @type {any} */ (source).resume();
+      if (!resumed) source = null;
+    }
+  }
+
   watchHandler();
   registerServiceWorker();
   setInterval(render, 1000); // ages must tick even with no new packets

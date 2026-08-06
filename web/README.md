@@ -106,6 +106,12 @@ Pick **USB cable** and hit Connect; the browser shows a port chooser. Works on
 desktop Chrome and Chrome for Android 150+ (with an OTG cable). Safari does not
 implement Web Serial.
 
+Unplugging is handled: the app watches `navigator.serial` connect and
+disconnect events, remembers which device you chose, and reopens it
+automatically on replug -- `getPorts()` returns already-granted ports without
+needing a user gesture. A serial session also resumes on page load. You should
+only ever see the device chooser once.
+
 Unlike the HTTP transport, serial is **framed**: each FromRadio message is
 wrapped in `0x94 0xC3 <len-hi> <len-lo>`, and the device writes plain-text debug
 logs onto the same port. `js/framing.js` is a resumable state machine that
@@ -181,6 +187,7 @@ node web/test/decode.test.mjs   # protobuf reader and Meshtastic decode
 node web/test/wifi.test.mjs     # HTTP transport, with fetch stubbed
 node web/test/framing.test.mjs  # serial stream framing
 node web/test/geo.test.mjs      # distance, bearing, arrow rotation
+node web/test/serial.test.mjs   # port matching for replug recovery
 ```
 
 These build synthetic Meshtastic frames byte by byte and assert the decoder

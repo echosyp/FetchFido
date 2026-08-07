@@ -96,18 +96,35 @@ if [ "$do_export" = 1 ]; then
   fi
 fi
 
-say "Tagging the running image for rollback"
-rollback="fetchfido:rollback-$(date +%Y-%m-%d-%H%M)"
+# Recorded before the build so the old image can still be identified by ID after
+# the tag has moved. Tagging up front looks safer but is not: if the build
+# produces a byte-identical image, both tags land on the same ID and the
+# "rollback" would restore exactly what is already running - false comfort at
+# the moment you most need the real thing.
+previous_id=""
 if podman --remote image exists "$IMAGE"; then
-  podman --remote tag "$IMAGE" "$rollback"
-  echo "   $rollback"
-else
-  echo "   no existing image to tag"
-  rollback=""
+  previous_id=$(podman --remote inspect "$IMAGE" --format '{{.Id}}')
 fi
 
 say "Building"
 podman --remote build -t "$IMAGE" .
+
+new_id=$(podman --remote inspect "$IMAGE" --format '{{.Id}}')
+
+say "Rollback point"
+rollback=""
+if [ -z "$previous_id" ]; then
+  echo "   none - no image existed before this build"
+elif [ "$previous_id" = "$new_id" ]; then
+  # Worth saying out loud: it means no source change reached the image, so a
+  # deploy that was meant to ship something has not.
+  echo "   image is unchanged (${new_id:7:12}) - this is a restart, not a new build"
+  echo "   no rollback tag created; there is nothing to roll back to"
+else
+  rollback="fetchfido:rollback-$(date +%Y-%m-%d-%H%M)"
+  podman --remote tag "$previous_id" "$rollback"
+  echo "   $rollback -> ${previous_id:7:12} (replaced by ${new_id:7:12})"
+fi
 
 say "Swapping the container"
 podman --remote stop -t 5 "$NAME" >/dev/null 2>&1 || true

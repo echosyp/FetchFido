@@ -578,31 +578,47 @@ func infoHandler(w http.ResponseWriter, r *http.Request) {
 var htmlTemplates *htmltemplate.Template
 var jsTemplates *texttemplate.Template
 
+// staticVersion is appended to static asset URLs so a browser fetches them again
+// after a deploy instead of serving a cached copy. It is stamped once at start
+// up, which is exactly the right granularity here: the assets live in the image,
+// so they can only change when a new image is rolled out - and that restarts the
+// process. A plain restart re-fetches unnecessarily, which costs one request.
+//
+// Without this a deploy looks like it silently failed: the server is new, the
+// page is old, and only a hard refresh reveals the difference.
+var staticVersion string
+
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
+
+	// The page carries the versioned asset URLs, so caching the HTML would pin a
+	// browser to the old version numbers and defeat the whole mechanism.
+	w.Header().Set("Cache-Control", "no-store")
 
 	stored := dataStore.GetMessagesNewestFirst()
 	limit := parseLimit(r)
 	messages := limitNewest(stored, limit)
 
 	data := struct {
-		Messages     []ReceivedMessage
-		MessageCount int
-		StoredCount  int
-		Limit        int
-		LimitChoices []int
-		MaxSize      int
-		ListenPort   string
-		WebPort      string
+		Messages      []ReceivedMessage
+		MessageCount  int
+		StoredCount   int
+		Limit         int
+		LimitChoices  []int
+		MaxSize       int
+		ListenPort    string
+		WebPort       string
+		StaticVersion string
 	}{
-		Messages:     messages,
-		MessageCount: len(messages),
-		StoredCount:  len(stored),
-		Limit:        limit,
-		LimitChoices: limitChoices(dataStore.MaxSize(), limit),
-		MaxSize:      dataStore.MaxSize(),
-		ListenPort:   getEnv("LISTEN_PORT", "9998"),
-		WebPort:      getEnv("PORT", "8080"),
+		Messages:      messages,
+		MessageCount:  len(messages),
+		StoredCount:   len(stored),
+		Limit:         limit,
+		LimitChoices:  limitChoices(dataStore.MaxSize(), limit),
+		MaxSize:       dataStore.MaxSize(),
+		ListenPort:    getEnv("LISTEN_PORT", "9998"),
+		WebPort:       getEnv("PORT", "8080"),
+		StaticVersion: staticVersion,
 	}
 
 	err := htmlTemplates.ExecuteTemplate(w, "index.html", data)
@@ -680,6 +696,10 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 
 func gpsDataHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
+
+	// Regenerated per request from live data, so it must never be served from
+	// cache - a stale copy would plot positions that are no longer stored.
+	w.Header().Set("Cache-Control", "no-store")
 
 	// Oldest first: this feeds the map, where the polyline is a track and has to
 	// be drawn in the order the positions were captured. The display limit keeps
@@ -936,6 +956,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Error loading JS templates:", err)
 	}
+
+	staticVersion = strconv.FormatInt(time.Now().Unix(), 10)
 
 	capacity := maxMessages()
 	dataStore = NewDataStore(capacity)

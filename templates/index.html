@@ -2,13 +2,16 @@
 <html lang="en">
 <head>
     <title>FetchFido - Data Receiver</title>
-    <link rel="stylesheet" type="text/css" href="/static/css/style.css">
+    <!-- ?v= is stamped at server start. Without it a browser keeps serving the
+         previous deploy's CSS and JS, which reads as "the deploy did nothing"
+         until someone thinks to hard-refresh. -->
+    <link rel="stylesheet" type="text/css" href="/static/css/style.css?v={{.StaticVersion}}">
     <!-- Leaflet 1.9.4, vendored rather than pulled from a CDN: the dashboard has
          to work on a network with no route to the internet, and every byte sent
          to the browser should be reviewable in this repository. Hashes are
          recorded in static/vendor/VENDOR.md. -->
-    <link rel="stylesheet" href="/static/vendor/leaflet.css"/>
-    <script src="/static/vendor/leaflet.js"></script>
+    <link rel="stylesheet" href="/static/vendor/leaflet.css?v={{.StaticVersion}}"/>
+    <script src="/static/vendor/leaflet.js?v={{.StaticVersion}}"></script>
 </head>
 <body>
     <div class="header">
@@ -82,6 +85,6 @@
 
     <!-- The limit rides along so the map plots the same fixes the list shows. -->
     <script src="/gps-data.js{{if .Limit}}?limit={{.Limit}}{{end}}"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v={{.StaticVersion}}"></script>
 </body>
 </html>

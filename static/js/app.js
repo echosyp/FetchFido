@@ -160,6 +160,48 @@ function initMap() {
     }
 }
 
+// Confidence bands in metres. PROTOCOL.md records a fix reporting 77.5 m that
+// was measured ~490 m from the true position, so these describe how much to
+// trust a point, not a radius to draw. A legacy 2-field fix carries no
+// confidence at all and is drawn differently again rather than being coloured as
+// if it were good.
+const CONFIDENCE_BANDS = [
+    {max: 10,       color: '#3fb950', label: 'good'},
+    {max: 30,       color: '#d29922', label: 'fair'},
+    {max: Infinity, color: '#f85149', label: 'poor'}
+];
+
+const UNKNOWN_CONFIDENCE = {color: '#8b949e', label: 'not reported'};
+
+function confidenceStyle(point) {
+    if (!point.extended || point.confidence === null) {
+        return UNKNOWN_CONFIDENCE;
+    }
+    return CONFIDENCE_BANDS.find(band => point.confidence <= band.max);
+}
+
+// Radius grows with reported error so a vague fix visibly occupies more ground
+// than a precise one, but only weakly (sqrt) and clamped - a 500 m reading drawn
+// to scale would swamp the map at street zoom.
+function confidenceRadius(point) {
+    if (!point.extended || point.confidence === null) {
+        return 6;
+    }
+    return Math.max(5, Math.min(18, 4 + Math.sqrt(point.confidence)));
+}
+
+function markerFor(point) {
+    const style = confidenceStyle(point);
+
+    return L.circleMarker([point.lat, point.lng], {
+        radius: confidenceRadius(point),
+        color: style.color,
+        fillColor: style.color,
+        fillOpacity: 0.45,
+        weight: 2
+    });
+}
+
 function addMarkersToMap() {
     // Clear existing markers
     markers.forEach(marker => map.removeLayer(marker));
@@ -167,13 +209,14 @@ function addMarkersToMap() {
 
     // Add new markers
     window.gpsData.forEach((point, index) => {
-        const marker = L.marker([point.lat, point.lng]).addTo(map);
+        const marker = markerFor(point).addTo(map);
 
         // Only present on the extended payload. fixTime is separately null when
         // the device had no clock, which is not the same as no reading at all.
+        const style = confidenceStyle(point);
         const extendedDetail = point.extended ? `
                 <p><strong>Fix taken:</strong> ${point.fixTime || 'unknown (device had no clock)'}</p>
-                <p><strong>Confidence:</strong> ${point.confidence} m</p>
+                <p><strong>Confidence:</strong> ${point.confidence} m (${style.label})</p>
                 <p><strong>Satellites seen:</strong> ${point.satellites}</p>
         ` : '';
 

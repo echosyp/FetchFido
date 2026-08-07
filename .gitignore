@@ -2,3 +2,7 @@
 .idea
 test_manual_gps.py
 verify_fix.py
+
+# Compiled binary - the Dockerfile builds its own, and a 13MB blob
+# churning on every commit is what made .git 27MB.
+/fetchfido

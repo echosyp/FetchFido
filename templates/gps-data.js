@@ -23,7 +23,9 @@ window.gpsData = [
         data: {{printf "%q" .Data}},
         extended: {{.Coordinates.Extended}},
         // null when the payload carried no clock reading — unknown, not 1970.
-        fixTime: {{with .Coordinates.FixTime}}"{{.Format "2006-01-02 15:04:05"}} UTC"{{else}}null{{end}},
+        // Rendered in DISPLAY_TZ like every other timestamp, zone named in the
+        // value, so a popup cannot disagree with the card beside it.
+        fixTime: {{if .FixTimeLocal}}"{{.FixTimeLocal}}"{{else}}null{{end}},
         confidence: {{if .Coordinates.Extended}}{{.Coordinates.Confidence}}{{else}}null{{end}},
         satellites: {{if .Coordinates.Extended}}{{.Coordinates.Satellites}}{{else}}null{{end}}
     },

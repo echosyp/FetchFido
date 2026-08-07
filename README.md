@@ -21,6 +21,18 @@ A security-hardened Go web service for receiving and visualizing GPS data over U
   limit only affects rendering — widening it again brings older fixes back.
 - **Clear**: A button discards the stored fixes. The store is memory-only, so
   this cannot be undone; export CSV first if the data matters.
+- **Confidence Shown Honestly**: Map markers are sized and coloured by the
+  reported horizontal error, so a vague fix cannot pass for a precise one. The
+  device's estimate reads optimistically in poor conditions — a 77.5 m reading
+  was measured ~490 m out — so it is a hint, not a radius.
+- **Duplicate Suppression**: Replayed fixes are deduplicated on
+  (capture time, latitude, longitude). Fixes with no capture time — legacy
+  payloads, or extended ones sent before the clock synced — are deliberately
+  left alone, since a stationary device repeating a position is not a duplicate.
+- **Optional Basic Auth**: Set `AUTH_USER` and `AUTH_PASS` to require
+  credentials. Off by default so an upgrade never locks anyone out.
+- **Vendored Assets**: Leaflet is committed under `static/vendor/`, hash-verified
+  in `VENDOR.md`, so the dashboard works with no route to the internet.
 - **TLS 1.3 Support**: Optional HTTPS encryption for secure communication
 - **Health & Info Endpoints**: Standard `/health` and `/info` endpoints for monitoring
 - **Security Hardened**: Runs in a scratch container as non-root user (UID 65534)
@@ -132,6 +144,11 @@ Environment variables:
 | `LISTEN_PORT` | `9998` | UDP listener port |
 | `LISTEN_IP` | `0.0.0.0` | Bind address for all listeners |
 | `MAX_MESSAGES` | `100` | How many messages the in-memory ring buffer retains. Bounds memory directly; invalid or non-positive values fall back to the default |
+| `DEFAULT_LIMIT` | `250` | How many fixes are displayed when the URL carries no `?limit=`. Stops a large buffer rendering thousands of markers on every load; `0` means no cap |
+| `DISPLAY_TZ` | `UTC` | IANA zone for displayed timestamps, e.g. `America/Chicago`. The zone is named in every rendered value |
+| `ACK_ENABLED` | `false` | Reply `ACK` to accepted datagrams so the sender can tell delivery from "the datagram left the building" |
+| `AUTH_USER` | - | Basic auth username. Auth engages only when both this and `AUTH_PASS` are set |
+| `AUTH_PASS` | - | Basic auth password. `/health` stays open so monitoring needs no credentials |
 | `APP_VERSION` | `1.0.0` | Application version |
 | `APP_ENV` | `development` | Environment name |
 | `TLS_CERT_FILE` | - | Path to TLS certificate (enables HTTPS) |

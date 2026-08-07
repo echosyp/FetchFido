@@ -3,12 +3,12 @@
 <head>
     <title>FetchFido - Data Receiver</title>
     <link rel="stylesheet" type="text/css" href="/static/css/style.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-          crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-            crossorigin=""></script>
+    <!-- Leaflet 1.9.4, vendored rather than pulled from a CDN: the dashboard has
+         to work on a network with no route to the internet, and every byte sent
+         to the browser should be reviewable in this repository. Hashes are
+         recorded in static/vendor/VENDOR.md. -->
+    <link rel="stylesheet" href="/static/vendor/leaflet.css"/>
+    <script src="/static/vendor/leaflet.js"></script>
 </head>
 <body>
     <div class="header">
@@ -36,6 +36,14 @@
     <div class="map-container">
         <h2>GPS Location Map</h2>
         <div id="map"></div>
+        <p class="map-legend">
+            Marker colour and size show reported confidence (horizontal error):
+            <span class="legend-swatch" style="background:#3fb950"></span> good, &le;10&nbsp;m
+            <span class="legend-swatch" style="background:#d29922"></span> fair, &le;30&nbsp;m
+            <span class="legend-swatch" style="background:#f85149"></span> poor, &gt;30&nbsp;m
+            <span class="legend-swatch" style="background:#8b949e"></span> not reported (legacy payload)
+            &mdash; the device's estimate reads optimistically in poor conditions, so treat it as a hint, not a radius.
+        </p>
     </div>
 
     <div class="messages">
@@ -60,7 +68,7 @@
                 {{end}}
                 {{if .Coordinates.Extended}}
                 <div class="fix-detail">
-                    Fix taken: {{with .Coordinates.FixTime}}{{.Format "2006-01-02 15:04:05"}} UTC{{else}}unknown (device had no clock){{end}}
+                    Fix taken: {{if .FixTimeLocal}}{{.FixTimeLocal}}{{else}}unknown (device had no clock){{end}}
                     &middot; Confidence: {{.Coordinates.Confidence}} m
                     &middot; Satellites seen: {{.Coordinates.Satellites}}
                 </div>

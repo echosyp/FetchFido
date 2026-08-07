@@ -1,0 +1,6 @@
+# Vendored third-party files must survive round-tripping through git
+# byte-for-byte, or the SHA-256 hashes recorded in static/vendor/VENDOR.md stop
+# verifying. leaflet.css ships with CRLF endings, which git would otherwise
+# normalise to LF on commit - silently changing the file the hash describes.
+# Disable all line-ending normalisation for them.
+static/vendor/** -text

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/csv"
 	"encoding/hex"
@@ -103,6 +104,17 @@ type ReceivedMessage struct {
 // rather than repeated as a format string at every call site.
 func (m ReceivedMessage) LocalTime() string {
 	return formatTS(m.Timestamp)
+}
+
+// FixTimeLocal renders the capture time in the same zone as LocalTime. Without
+// this the templates showed arrival in the display zone and capture in UTC, so a
+// fix taken one second before it arrived read as hours earlier on the same card.
+// Empty when the device had no clock, which the templates render as unknown.
+func (m ReceivedMessage) FixTimeLocal() string {
+	if m.Coordinates.FixTime == nil {
+		return ""
+	}
+	return formatTS(*m.Coordinates.FixTime)
 }
 
 // EffectiveTime is the time a message should be ordered by: the capture time
@@ -274,16 +286,32 @@ func parseGPSCoordinates(data string) GPSCoordinate {
 	return coords
 }
 
-// AddMessage stores data only if it parses as GPS coordinates, and reports
-// whether it was stored. Unparseable traffic is dropped so that broadcast
-// noise on a shared network cannot evict real coordinates from the buffer.
-func (ds *DataStore) AddMessage(data, source string) bool {
+// addResult distinguishes the two reasons a datagram is not stored. They need
+// different handling: unparseable traffic is noise, whereas a duplicate was
+// genuinely delivered and its sender should be told so rather than left
+// retrying.
+type addResult int
+
+const (
+	addStored addResult = iota
+	addUnparseable
+	addDuplicate
+)
+
+// AddMessage stores data only if it parses as GPS coordinates and is not
+// already held. Unparseable traffic is dropped so that broadcast noise on a
+// shared network cannot evict real coordinates from the buffer.
+func (ds *DataStore) AddMessage(data, source string) addResult {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
 	coordinates := parseGPSCoordinates(data)
 	if !coordinates.Valid {
-		return false
+		return addUnparseable
+	}
+
+	if ds.isDuplicate(coordinates) {
+		return addDuplicate
 	}
 
 	msg := ReceivedMessage{
@@ -310,7 +338,36 @@ func (ds *DataStore) AddMessage(data, source string) bool {
 		}
 	}
 
-	return true
+	return addStored
+}
+
+// isDuplicate reports whether an identical fix is already stored, keyed on
+// (epoch, lat, lon) as PROTOCOL.md recommends. Nothing suppresses duplicates on
+// the wire, and a replayed backlog can redeliver a fix that already arrived.
+//
+// Only fixes carrying a capture time are deduplicated. Epoch 0 makes the key
+// useless - every clockless fix would share it - and a legacy 2-field payload
+// has no epoch at all, so a device parked in one spot would have its genuinely
+// repeated positions collapsed into one. Those are left alone deliberately.
+//
+// The caller already holds the lock.
+func (ds *DataStore) isDuplicate(c GPSCoordinate) bool {
+	if c.FixTime == nil {
+		return false
+	}
+
+	for _, existing := range ds.messages {
+		if existing.Coordinates.FixTime == nil {
+			continue
+		}
+		if existing.Coordinates.FixTime.Equal(*c.FixTime) &&
+			existing.Coordinates.Latitude == c.Latitude &&
+			existing.Coordinates.Longitude == c.Longitude {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Clear discards every stored message. The store is memory-only, so this is
@@ -380,19 +437,43 @@ func (ds *DataStore) GetMessagesNewestFirst() []ReceivedMessage {
 
 var dataStore *DataStore
 
-// parseLimit reads the ?limit= display cap. Absent, "all", or anything that is
-// not a positive number means no limit: show everything stored. The limit only
+// parseLimit reads the ?limit= display cap. An absent parameter takes the
+// configured default rather than showing everything: with a large MAX_MESSAGES a
+// full buffer would otherwise render thousands of message rows, map markers and
+// polyline points on every load. "all" opts out explicitly. The limit only
 // affects what is rendered - nothing is evicted, so widening it again brings the
 // older fixes straight back.
 func parseLimit(r *http.Request) int {
 	raw := r.URL.Query().Get("limit")
-	if raw == "" || raw == "all" {
+	if raw == "" {
+		return defaultLimit()
+	}
+	if raw == "all" {
 		return 0
 	}
 
 	n, err := strconv.Atoi(raw)
 	if err != nil || n <= 0 {
 		return 0
+	}
+
+	return n
+}
+
+// defaultLimit is how many fixes are shown when the URL says nothing. 0 means
+// no cap, which is only sensible for a small buffer.
+func defaultLimit() int {
+	const fallback = 250
+
+	raw := getEnv("DEFAULT_LIMIT", "")
+	if raw == "" {
+		return fallback
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		log.Printf("Invalid DEFAULT_LIMIT %q, using %d", raw, fallback)
+		return fallback
 	}
 
 	return n
@@ -637,7 +718,9 @@ func exportCSVHandler(w http.ResponseWriter, r *http.Request) {
 	// Write CSV header
 	err := writer.Write([]string{
 		"Timestamp", "Source", "Data", "Latitude", "Longitude", "GPS Valid",
-		"Fix Time (UTC)", "Confidence (m)", "Satellites",
+		// Not labelled UTC: these render in DISPLAY_TZ like every other
+		// timestamp, and formatTS names the zone in the value itself.
+		"Fix Time", "Confidence (m)", "Satellites",
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -727,18 +810,25 @@ func udpListener() {
 		message := string(buffer[:n])
 		source := clientAddr.String()
 
-		if !dataStore.AddMessage(message, source) {
+		switch dataStore.AddMessage(message, source) {
+		case addUnparseable:
 			log.Printf("Ignored non-GPS message from %s (%d bytes): %s",
 				source, n, summarizeDropped(buffer[:n]))
 			continue
+
+		case addDuplicate:
+			// Acknowledged below despite not being stored. The fix did arrive -
+			// twice - and withholding the ACK would have the sender retry a
+			// position already held, forever.
+			log.Printf("Duplicate fix from %s, already stored: %s", source, message)
+
+		case addStored:
+			log.Printf("Received UDP message from %s: %s", source, message)
 		}
 
-		log.Printf("Received UDP message from %s: %s", source, message)
-
-		// Only accepted messages are acknowledged. A sender treating silence
-		// as failure will then retry a fix that was rejected, which is the
-		// behaviour worth having: it is stored or it is retried, never
-		// silently dropped.
+		// A sender treating silence as failure will retry anything not
+		// acknowledged, which is the behaviour worth having: it is stored (or
+		// already was) or it is retried, never silently dropped.
 		if ackEnabled {
 			if _, err := conn.WriteToUDP([]byte("ACK"), clientAddr); err != nil {
 				log.Printf("Failed to ACK %s: %v", source, err)
@@ -782,6 +872,42 @@ func summarizeDropped(payload []byte) string {
 	return rendered
 }
 
+// requireAuth wraps a handler in HTTP basic auth when AUTH_USER and AUTH_PASS
+// are both set. With either unset it is a no-op, so an existing deployment is
+// never locked out by upgrading - but the dashboard serves live positions and
+// /clear destroys the only copy of them, so setting these is worth doing on any
+// network you do not fully control.
+//
+// Basic auth over plain HTTP sends the password base64-encoded, not encrypted.
+// It stops someone wandering in from a browser; it does not protect against
+// anyone watching the traffic. Pair it with TLS_CERT_FILE/TLS_KEY_FILE.
+func requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	wantUser := getEnv("AUTH_USER", "")
+	wantPass := getEnv("AUTH_PASS", "")
+
+	if wantUser == "" || wantPass == "" {
+		return next
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+
+		// Compared with constant-time equality so a response cannot be timed to
+		// recover the credentials character by character. Both comparisons run
+		// unconditionally for the same reason.
+		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(wantUser)) == 1
+		passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(wantPass)) == 1
+
+		if !ok || !userOK || !passOK {
+			w.Header().Set("WWW-Authenticate", `Basic realm="FetchFido", charset="UTF-8"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -817,15 +943,25 @@ func main() {
 
 	go udpListener()
 
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	http.HandleFunc("/", rootHandler)
+	// /health is deliberately left open so a monitor or container healthcheck
+	// does not need credentials. It reveals nothing but liveness. Everything
+	// else either serves positions or changes state.
+	http.Handle("/static/", http.StripPrefix("/static/",
+		requireAuth(http.FileServer(http.Dir("static")).ServeHTTP)))
+	http.HandleFunc("/", requireAuth(rootHandler))
 	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/info", infoHandler)
-	http.HandleFunc("/messages", messagesHandler)
-	http.HandleFunc("/events", eventsHandler)
-	http.HandleFunc("/clear", clearHandler)
-	http.HandleFunc("/gps-data.js", gpsDataHandler)
-	http.HandleFunc("/export/csv", exportCSVHandler)
+	http.HandleFunc("/info", requireAuth(infoHandler))
+	http.HandleFunc("/messages", requireAuth(messagesHandler))
+	http.HandleFunc("/events", requireAuth(eventsHandler))
+	http.HandleFunc("/clear", requireAuth(clearHandler))
+	http.HandleFunc("/gps-data.js", requireAuth(gpsDataHandler))
+	http.HandleFunc("/export/csv", requireAuth(exportCSVHandler))
+
+	if getEnv("AUTH_USER", "") != "" && getEnv("AUTH_PASS", "") != "" {
+		log.Printf("Basic auth enabled (/health left open)")
+	} else {
+		log.Printf("Warning: no authentication. Set AUTH_USER and AUTH_PASS to require credentials.")
+	}
 
 	server := &http.Server{
 		Addr: listenIP + ":" + port,

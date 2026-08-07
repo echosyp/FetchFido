@@ -78,8 +78,16 @@ if [ "$do_export" = 1 ]; then
   mkdir -p "$BACKUP_DIR"
   stamp=$(date +%Y-%m-%dT%H%M%S)
   out="$BACKUP_DIR/fetchfido-predeploy-$stamp.csv"
+
+  # Send credentials when they are configured: once auth is on, an unauthenticated
+  # export returns 401 and would write an error page over the only copy of the data.
+  cred_arg=""
+  if [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASS" ]; then
+    cred_arg="-u $AUTH_USER:$AUTH_PASS"
+  fi
+
   if ssh -o BatchMode=yes "$SSH_HOST" \
-       "curl -s --max-time 15 http://127.0.0.1:$WEB_PORT/export/csv" > "$out" 2>/dev/null \
+       "curl -sf $cred_arg --max-time 15 http://127.0.0.1:$WEB_PORT/export/csv" > "$out" 2>/dev/null \
      && [ -s "$out" ]; then
     echo "   $(( $(wc -l < "$out") - 1 )) rows -> $out"
   else

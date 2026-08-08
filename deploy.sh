@@ -101,29 +101,39 @@ fi
 # produces a byte-identical image, both tags land on the same ID and the
 # "rollback" would restore exactly what is already running - false comfort at
 # the moment you most need the real thing.
-previous_id=""
-if podman --remote image exists "$IMAGE"; then
-  previous_id=$(podman --remote inspect "$IMAGE" --format '{{.Id}}')
-fi
+# "image inspect", not bare "inspect": the latter also searches containers, and
+# there is a container with this project's name, so the bare form can resolve to
+# the wrong object entirely.
+previous_id=$(podman --remote image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null || true)
 
 say "Building"
 podman --remote build -t "$IMAGE" .
 
-new_id=$(podman --remote inspect "$IMAGE" --format '{{.Id}}')
+new_id=$(podman --remote image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null || true)
+if [ -z "$new_id" ]; then
+  echo "cannot determine the built image ID - refusing to continue blind" >&2
+  exit 1
+fi
 
 say "Rollback point"
 rollback=""
 if [ -z "$previous_id" ]; then
-  echo "   none - no image existed before this build"
+  # Genuine on a first deploy. Any other time it means the lookup failed and
+  # this deploy has no way back, so say that rather than imply it is normal.
+  echo "   NONE - could not identify the previous image before building."
+  echo "   If this is not the first deploy, that lookup failed and there is no"
+  echo "   rollback point for this release. Recover one with:"
+  echo "     podman --remote images -a   # find the prior ID"
+  echo "     podman --remote tag <id> fetchfido:rollback-manual"
 elif [ "$previous_id" = "$new_id" ]; then
   # Worth saying out loud: it means no source change reached the image, so a
   # deploy that was meant to ship something has not.
-  echo "   image is unchanged (${new_id:7:12}) - this is a restart, not a new build"
+  echo "   image is unchanged (${new_id:0:12}) - this is a restart, not a new build"
   echo "   no rollback tag created; there is nothing to roll back to"
 else
   rollback="fetchfido:rollback-$(date +%Y-%m-%d-%H%M)"
   podman --remote tag "$previous_id" "$rollback"
-  echo "   $rollback -> ${previous_id:7:12} (replaced by ${new_id:7:12})"
+  echo "   $rollback -> ${previous_id:0:12} (replaced by ${new_id:0:12})"
 fi
 
 say "Swapping the container"
@@ -170,4 +180,6 @@ podman --remote logs "$NAME" 2>&1 \
   | sed 's/^/   /'
 
 say "Deployed"
-[ -n "$rollback" ] && echo "   rollback image: $rollback"
+if [ -n "$rollback" ]; then
+  echo "   rollback image: $rollback"
+fi

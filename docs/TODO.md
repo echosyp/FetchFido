@@ -69,7 +69,13 @@ Keep the no-package-manager constraint in mind when choosing how the deploy
 runs: prefer Cloudflare's git integration or a pinned, hash-verified CLI over a
 dependency tree.
 
-**Status (2026-10-18):** `wrangler.jsonc` and `make worker` exist and build.
-Not yet done: create the D1 database and paste its id into `wrangler.jsonc`,
-connect the repository to Workers Builds (build command `make worker`, Go
-toolchain present), and the first deploy.
+**Status (2026-10-18):** deployed by hand and working at
+https://fetchfido.echosyp.workers.dev: D1 database created, its id in
+`wrangler.jsonc`, `npx wrangler@4 deploy` runs `make worker` and uploads the
+WASM plus the assets (`web/.assetsignore` keeps tests and READMEs out). The
+first deploy found that password hashing in WebAssembly blew the free plan's
+10 ms CPU limit (Cloudflare error 1102); the derivation now runs in the browser
+(`web/js/kdf.js`, `internal/auth`). Cold start measured 7 ms, a login round
+trip well under the limit. Not yet done: connect the repository to Workers
+Builds so a push to this branch deploys (the build image needs Go 1.24+ for
+`make worker`; verify), and a custom domain.

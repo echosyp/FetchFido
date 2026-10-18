@@ -6,3 +6,7 @@ verify_fix.py
 # Build outputs
 /build/
 /fetchfido
+
+# wrangler state and the lockfile npx drops when run from here
+/.wrangler/
+/package-lock.json

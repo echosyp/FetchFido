@@ -1,0 +1,8 @@
+# Files in web/ that are not part of the app and must not be published as
+# static assets by the Worker. Same syntax as .gitignore. The service worker's
+# shell list (sw.js) is the authoritative set of files the app needs.
+.assetsignore
+README.md
+package.json
+test/
+vendor/VENDOR.md

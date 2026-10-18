@@ -14,7 +14,12 @@
  * Two server modes, told apart by /api/v1/me:
  *   single    no accounts; maybe a shared access token
  *   accounts  email + password; only claimed collars are stored server-side
+ *
+ * Passwords never leave the phone. The browser derives a key from them
+ * (kdf.js) and that is what register and login send.
  */
+
+import { deriveKey, KDF } from './kdf.js';
 
 /** @typedef {import('./meshtastic.js').Position} Position */
 
@@ -37,6 +42,7 @@
  * @property {boolean} tokenRequired
  * @property {number} retentionDays
  * @property {string} [email]
+ * @property {string} [kdf] the password derivation the server expects
  */
 
 const BATCH = 500;
@@ -197,12 +203,26 @@ export class Sync {
 
   /** @param {string} email @param {string} password */
   async register(email, password) {
-    await this._auth('/api/v1/auth/register', { email, password });
+    await this._auth('/api/v1/auth/register', { email, ...(await this._derive(email, password)) });
   }
 
   /** @param {string} email @param {string} password */
   async login(email, password) {
-    await this._auth('/api/v1/auth/login', { email, password });
+    await this._auth('/api/v1/auth/login', { email, ...(await this._derive(email, password)) });
+  }
+
+  /**
+   * The server names the derivation it expects. If it is not the one this
+   * app implements, say so before spending half a second deriving a key the
+   * server would refuse anyway.
+   * @param {string} email @param {string} password
+   */
+  async _derive(email, password) {
+    const want = this.info?.kdf;
+    if (want && want !== KDF) {
+      throw new Error('this app version derives passwords differently from the server; reload the app');
+    }
+    return deriveKey(email, password);
   }
 
   /** Single mode with an access token. @param {string} token */

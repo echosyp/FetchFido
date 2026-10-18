@@ -48,7 +48,6 @@ A prebuilt image is published to `quay.io/f0c8bbv93/fetchfido`.
 | `RETENTION_DAYS` | `30` | Positions older than this are deleted on each sync. `0` keeps forever. |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | *(none)* | Serve HTTPS directly. Otherwise put a reverse proxy in front. |
 | `SECURE_COOKIES` | auto | Force the `Secure` flag when a proxy terminates TLS |
-| `PBKDF2_ITERATIONS` | `600000` | Accounts mode password hashing cost |
 
 The container is `FROM scratch`, runs as UID 65534, has no shell, and makes no
 outbound connections. The binary is pure Go (`modernc.org/sqlite`), so
@@ -74,8 +73,8 @@ Both deployments serve `/api/v1`:
 ```
 GET  /api/v1/health
 GET  /api/v1/me                      mode, sign-in state, retention
-POST /api/v1/auth/register           accounts mode
-POST /api/v1/auth/login              {email,password} or {token}
+POST /api/v1/auth/register           accounts mode: {email, kdf, key}
+POST /api/v1/auth/login              {email, kdf, key} or {token}
 POST /api/v1/auth/logout
 GET  /api/v1/devices
 POST /api/v1/devices/claim           {nodeId, name, shortName, colour}
@@ -87,6 +86,23 @@ GET  /api/v1/export?format=csv
 
 Writes require JSON and a same-origin request; sessions are HttpOnly cookies.
 Tenant isolation is enforced in `internal/store`, not in handlers.
+
+**Passwords never reach the server.** The app derives a 32-byte key from the
+password in the browser (`web/js/kdf.js`: PBKDF2-SHA256, 600,000 rounds, salted
+with a digest of the email) and sends `kdf: "pbkdf2-sha256-v1"` plus the key,
+base64url. The server stores a salted SHA-256 of the key, so a stolen database
+still costs an attacker the full PBKDF2 work per guess, while a login costs the
+server one hash. That is what lets the same code run on a Cloudflare Worker's
+10 ms CPU budget (`internal/auth` has the measurements). To call the API without
+the app, derive the key the same way; in Python:
+
+```python
+import hashlib, base64
+email, password = "you@example.com", "..."
+salt = hashlib.sha256(b"fetchfido-kdf-v1:" + email.lower().encode()).digest()
+key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600_000, 32)
+print(base64.urlsafe_b64encode(key).rstrip(b"=").decode())
+```
 
 ## Development
 
@@ -109,7 +125,7 @@ cmd/fetchfido   self-hosted server entry point
 cmd/worker      Cloudflare Worker entry point (GOOS=js GOARCH=wasm)
 internal/api    the HTTP API, both deployments
 internal/store  schema and queries, SQLite dialect, tenant isolation
-internal/auth   password hashing and session tokens
+internal/auth   password-key verification and session tokens
 embed.go        embeds web/ into the native binary
 Dockerfile      scratch container
 wrangler.jsonc  Worker configuration

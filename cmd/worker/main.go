@@ -56,14 +56,12 @@ func main() {
 		}
 
 		retention, _ := strconv.Atoi(env("RETENTION_DAYS", "30"))
-		iterations, _ := strconv.Atoi(env("PBKDF2_ITERATIONS", "0"))
 		api.New(st, api.Config{
-			Mode:             api.Mode(env("AUTH_MODE", string(api.ModeAccounts))),
-			AccessToken:      env("ACCESS_TOKEN", ""),
-			Registration:     env("REGISTRATION", "open") == "open",
-			RetentionDays:    retention,
-			SecureCookies:    true,
-			PBKDF2Iterations: iterations,
+			Mode:          api.Mode(env("AUTH_MODE", string(api.ModeAccounts))),
+			AccessToken:   env("ACCESS_TOKEN", ""),
+			Registration:  env("REGISTRATION", "open") == "open",
+			RetentionDays: retention,
+			SecureCookies: true,
 		}, nil).ServeHTTP(w, r)
 	}))
 }

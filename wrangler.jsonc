@@ -6,7 +6,7 @@
 // the WASM. Build with `make worker`.
 //
 // Before the first deploy, create the database and paste its id below:
-//   npx wrangler d1 create fetchfido
+//   npx wrangler@4 d1 create fetchfido
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "fetchfido",
@@ -25,7 +25,7 @@
     {
       "binding": "DB",
       "database_name": "fetchfido",
-      "database_id": "REPLACE-WITH-wrangler-d1-create-OUTPUT"
+      "database_id": "3d0b50e9-cc42-4ee3-8065-caea631d8495"
     }
   ],
   "vars": {

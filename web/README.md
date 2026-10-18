@@ -35,6 +35,7 @@ js/sources/serial.js Web Serial transport (cable; preferred off-grid)
 js/framing.js       Meshtastic stream framing (serial only)
 js/provision.js     configure the connected node as a collar (AdminMessages)
 js/sync.js          outbox upload, server pull, accounts and claims
+js/kdf.js           password key derivation in the browser (PBKDF2, WebCrypto)
 js/store.js         IndexedDB, deduped on [deviceId, ts]
 js/geo.js           distance, bearing, relative bearing, freshness
 js/heading.js       device compass (DeviceOrientation)

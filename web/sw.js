@@ -14,7 +14,7 @@
  * an area is available offline when it has not been visited.
  */
 
-const SHELL = 'fetchfido-shell-v21';
+const SHELL = 'fetchfido-shell-v22';
 const TILES = 'fetchfido-tiles-v1';
 
 const SHELL_FILES = [
@@ -34,6 +34,7 @@ const SHELL_FILES = [
   './js/framing.js',
   './js/provision.js',
   './js/sync.js',
+  './js/kdf.js',
   './js/heading.js',
   './js/awake.js',
   './js/sources/base.js',

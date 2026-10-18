@@ -2,7 +2,9 @@ package api_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"fetchfido/internal/api"
+	"fetchfido/internal/auth"
 	"fetchfido/internal/store"
 )
 
@@ -29,12 +32,17 @@ func newServer(t *testing.T, cfg api.Config) *httptest.Server {
 	if err := st.Init(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PBKDF2Iterations == 0 {
-		cfg.PBKDF2Iterations = 10_000 // tests, not production
-	}
 	srv := httptest.NewServer(api.New(st, cfg, nil))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// creds is what web/js/kdf.js would send for an email and password. The
+// handlers only check the key's shape, so any 32 bytes stand in for the
+// derivation; the real vector is pinned in internal/auth.
+func creds(email, password string) map[string]any {
+	sum := sha256.Sum256([]byte(strings.ToLower(email) + "\x00" + password))
+	return map[string]any{"email": email, "kdf": auth.KDF, "key": base64.RawURLEncoding.EncodeToString(sum[:])}
 }
 
 // client is a browser-ish caller: keeps cookies, sends an Origin.
@@ -187,16 +195,20 @@ func TestAccountsModeIsolatesTenantsAndRejectsUnclaimed(t *testing.T) {
 	res, out := alice.do("GET", "/api/v1/devices", nil)
 	want(t, res, 401, out)
 
-	res, out = alice.do("POST", "/api/v1/auth/register", map[string]any{"email": "Alice@Example.com", "password": "short"})
+	res, out = alice.do("POST", "/api/v1/auth/register", map[string]any{"email": "Alice@Example.com", "kdf": auth.KDF, "key": "dG9vIHNob3J0"})
+	want(t, res, 400, out)
+	res, out = alice.do("POST", "/api/v1/auth/register", map[string]any{"email": "Alice@Example.com", "kdf": "argon2id-v9", "key": creds("a", "b")["key"]})
 	want(t, res, 400, out)
 	res, out = alice.do("POST", "/api/v1/auth/register", map[string]any{"email": "Alice@Example.com", "password": "correct horse battery"})
+	want(t, res, 400, out) // the old protocol: a raw password is never accepted
+	res, out = alice.do("POST", "/api/v1/auth/register", creds("Alice@Example.com", "correct horse battery"))
 	want(t, res, 201, out)
 	if out["email"] != "alice@example.com" {
 		t.Fatalf("email normalised: %v", out)
 	}
-	res, out = bob.do("POST", "/api/v1/auth/register", map[string]any{"email": "alice@example.com", "password": "another long password"})
+	res, out = bob.do("POST", "/api/v1/auth/register", creds("alice@example.com", "another long password"))
 	want(t, res, 409, out)
-	res, out = bob.do("POST", "/api/v1/auth/register", map[string]any{"email": "bob@example.com", "password": "another long password"})
+	res, out = bob.do("POST", "/api/v1/auth/register", creds("bob@example.com", "another long password"))
 	want(t, res, 201, out)
 
 	// Unclaimed nodes are not stored, and the client is told which.
@@ -250,11 +262,11 @@ func TestAccountsModeIsolatesTenantsAndRejectsUnclaimed(t *testing.T) {
 
 	// Login round trip, including the wrong password.
 	fresh := newClient(t, srv)
-	res, out = fresh.do("POST", "/api/v1/auth/login", map[string]any{"email": "alice@example.com", "password": "wrong password here"})
+	res, out = fresh.do("POST", "/api/v1/auth/login", creds("alice@example.com", "wrong password here"))
 	want(t, res, 401, out)
-	res, out = fresh.do("POST", "/api/v1/auth/login", map[string]any{"email": "nobody@example.com", "password": "wrong password here"})
+	res, out = fresh.do("POST", "/api/v1/auth/login", creds("nobody@example.com", "wrong password here"))
 	want(t, res, 401, out)
-	res, out = fresh.do("POST", "/api/v1/auth/login", map[string]any{"email": "ALICE@example.com", "password": "correct horse battery"})
+	res, out = fresh.do("POST", "/api/v1/auth/login", creds("ALICE@example.com", "correct horse battery"))
 	want(t, res, 200, out)
 	res, out = fresh.do("GET", "/api/v1/me", nil)
 	want(t, res, 200, out)
@@ -271,7 +283,7 @@ func TestAccountsModeIsolatesTenantsAndRejectsUnclaimed(t *testing.T) {
 func TestRegistrationCanBeClosed(t *testing.T) {
 	srv := newServer(t, api.Config{Mode: api.ModeAccounts, Registration: false})
 	c := newClient(t, srv)
-	res, out := c.do("POST", "/api/v1/auth/register", map[string]any{"email": "a@b.co", "password": "long enough password"})
+	res, out := c.do("POST", "/api/v1/auth/register", creds("a@b.co", "long enough password"))
 	want(t, res, 403, out)
 	res, out = c.do("GET", "/api/v1/me", nil)
 	want(t, res, 200, out)

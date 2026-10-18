@@ -313,6 +313,16 @@ Hosted: `cmd/worker` built with `GOOS=js GOARCH=wasm`, loaded by the shim
 `workers-assets-gen` generates, with `web/` as the Worker's static assets so
 only `/api/*` reaches the WASM. `wrangler.jsonc` at the repository root.
 
+The Worker's CPU budget shapes the auth design. The free plan allows 10 ms of
+CPU per request; PBKDF2-SHA256 at 600,000 rounds measured 590 ms in
+WebAssembly and 71 ms natively (2026-10-18), so no server-side slow hash fits
+on any plan without billing for it. The browser therefore derives the password
+key with WebCrypto (`web/js/kdf.js`, salted by email) and the server stores a
+salted SHA-256 of that key (`internal/auth`). Database theft still costs the
+attacker the full PBKDF2 work per guess; the server pays one hash per login.
+The derivation is versioned by name and pinned by a shared test vector on
+both sides. Both deployments use it, so there is one protocol.
+
 ## 10. Phase 1 deliverables
 
 1. PWA shell with `CollarSource` and a working `BleSource`.

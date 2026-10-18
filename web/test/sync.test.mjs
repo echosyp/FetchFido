@@ -8,6 +8,11 @@
 
 import assert from 'node:assert/strict';
 import { Sync, fromWire } from '../js/sync.js';
+import { KDF } from '../js/kdf.js';
+
+// deriveKey('x@y', 'correct horse battery'): what the browser sends. The
+// derivation itself is tested in kdf.test.mjs; here it only has to match.
+const GOOD_KEY = await (await import('../js/kdf.js')).deriveKey('x@y', 'correct horse battery').then((k) => k.key);
 
 let passed = 0;
 async function test(name, fn) {
@@ -27,8 +32,9 @@ class MemOutbox {
 
 /** A fake FetchFido server. */
 class FakeServer {
-  constructor({ mode = 'accounts', authenticated = false } = {}) {
+  constructor({ mode = 'accounts', authenticated = false, kdf = KDF } = {}) {
     this.mode = mode;
+    this.kdf = kdf;
     this.authenticated = authenticated;
     this.claimed = new Set();
     this.stored = new Map();
@@ -43,9 +49,12 @@ class FakeServer {
     const body = init.body ? JSON.parse(init.body) : null;
     switch (u.pathname) {
       case '/api/v1/me':
-        return json(200, { mode: this.mode, authenticated: this.authenticated, registration: true, tokenRequired: this.mode === 'single', retentionDays: 30 });
+        return json(200, { mode: this.mode, authenticated: this.authenticated, registration: true, tokenRequired: this.mode === 'single', retentionDays: 30, kdf: this.kdf });
       case '/api/v1/auth/login':
-        if (body.token === 'tok' || body.password === 'correct horse battery') { this.authenticated = true; return json(200, {}); }
+        if (body.password !== undefined) return json(400, { error: 'raw password sent' });
+        if (body.token === 'tok') { this.authenticated = true; return json(200, {}); }
+        if (body.kdf !== this.kdf) return json(400, { error: 'this app version derives passwords differently from the server; reload the app' });
+        if (body.key === GOOD_KEY) { this.authenticated = true; return json(200, {}); }
         return json(401, { error: 'email or password incorrect' });
       case '/api/v1/auth/logout':
         this.authenticated = false; return json(200, {});
@@ -105,7 +114,8 @@ await test('unclaimed collars wait in the outbox; claiming releases their histor
   ob.add(pos('!a', 1)); ob.add(pos('!a', 2)); ob.add(pos('!b', 1));
   const s = new Sync(ob, { fetchImpl: srv.fetch });
   await s.probe();
-  await assert.rejects(s.login('x@y', 'wrong'), /incorrect/);
+  await assert.rejects(s.login('x@y', 'wrong password here'), /incorrect/);
+  await assert.rejects(s.login('x@y', 'short'), /at least 10/);
   await s.login('x@y', 'correct horse battery');
   assert.equal(s.state, 'idle');
   // login() kicks off a flush; wait for it.

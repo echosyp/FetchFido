@@ -37,7 +37,6 @@ func main() {
 	accessToken := env("ACCESS_TOKEN", "")
 	registration := env("REGISTRATION", "open") == "open"
 	retention, _ := strconv.Atoi(env("RETENTION_DAYS", "30"))
-	iterations, _ := strconv.Atoi(env("PBKDF2_ITERATIONS", "0"))
 	certFile := env("TLS_CERT_FILE", "")
 	keyFile := env("TLS_KEY_FILE", "")
 	tls := certFile != "" && keyFile != ""
@@ -63,12 +62,11 @@ func main() {
 	cancel()
 
 	h := api.New(st, api.Config{
-		Mode:             mode,
-		AccessToken:      accessToken,
-		Registration:     registration,
-		RetentionDays:    retention,
-		SecureCookies:    tls || env("SECURE_COOKIES", "") == "true",
-		PBKDF2Iterations: iterations,
+		Mode:          mode,
+		AccessToken:   accessToken,
+		Registration:  registration,
+		RetentionDays: retention,
+		SecureCookies: tls || env("SECURE_COOKIES", "") == "true",
 	}, fetchfido.Web)
 
 	log.Printf("FetchFido server starting")

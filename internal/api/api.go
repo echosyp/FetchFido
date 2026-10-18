@@ -54,8 +54,6 @@ type Config struct {
 	// SecureCookies marks session cookies Secure. True whenever the server is
 	// reached over https, which is always for the hosted version.
 	SecureCookies bool
-	// PBKDF2Iterations for new passwords; zero means auth.DefaultIterations.
-	PBKDF2Iterations int
 }
 
 const (
@@ -77,9 +75,6 @@ type Handler struct {
 func New(st *store.Store, cfg Config, web fs.FS) *Handler {
 	if cfg.Mode == "" {
 		cfg.Mode = ModeSingle
-	}
-	if cfg.PBKDF2Iterations == 0 {
-		cfg.PBKDF2Iterations = auth.DefaultIterations
 	}
 	h := &Handler{st: st, cfg: cfg, mux: http.NewServeMux()}
 	m := h.mux
@@ -208,6 +203,9 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		"registration":  h.cfg.Mode == ModeAccounts && h.cfg.Registration,
 		"tokenRequired": h.cfg.Mode == ModeSingle && h.cfg.AccessToken != "",
 		"retentionDays": h.cfg.RetentionDays,
+		// The client derives the password key itself (web/js/kdf.js) and must
+		// use the derivation this server expects; see internal/auth.
+		"kdf": auth.KDF,
 	}
 	p, err := h.resolve(r)
 	out["authenticated"] = err == nil
@@ -217,10 +215,27 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// credentials is the body of /auth/register and /auth/login. Accounts mode
+// sends email plus a client-derived key, never the password itself (see
+// internal/auth for why). Single mode sends the shared access token.
 type credentials struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Token    string `json:"token"`
+	Email string `json:"email"`
+	KDF   string `json:"kdf"`
+	Key   string `json:"key"`
+	Token string `json:"token"`
+}
+
+// derivedKey validates the key fields of a credentials body. The message is
+// shown to users whose app is older than the server, so it says what to do.
+func (c credentials) derivedKey() ([]byte, string) {
+	if c.KDF != auth.KDF {
+		return nil, "this app version derives passwords differently from the server; reload the app"
+	}
+	key, err := auth.DecodeKey(c.Key)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return key, ""
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
@@ -242,13 +257,14 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "a valid email address is required")
 		return
 	}
-	if len(c.Password) < 10 || len(c.Password) > 1024 {
-		writeErr(w, http.StatusBadRequest, "password must be at least 10 characters")
+	key, msg := c.derivedKey()
+	if msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
-	hash, err := auth.HashPassword(c.Password, h.cfg.PBKDF2Iterations)
+	hash, err := auth.HashKey(key)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "could not hash password")
+		internal(w, err)
 		return
 	}
 	u, err := h.st.CreateUser(r.Context(), c.Email, hash)
@@ -275,17 +291,22 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	switch h.cfg.Mode {
 	case ModeAccounts:
+		key, msg := c.derivedKey()
+		if msg != "" {
+			writeErr(w, http.StatusBadRequest, msg)
+			return
+		}
 		u, err := h.st.UserByEmail(r.Context(), strings.ToLower(strings.TrimSpace(c.Email)))
 		// Same answer for unknown email and wrong password; the hash check
 		// still runs on a dummy so timing does not reveal which it was.
 		stored := u.PasswordHash
 		if errors.Is(err, sql.ErrNoRows) {
-			stored = "pbkdf2-sha256$1$AA$AA"
+			stored = "sha256$AA$AA"
 		} else if err != nil {
 			internal(w, err)
 			return
 		}
-		if !auth.CheckPassword(c.Password, stored) || err != nil {
+		if !auth.CheckKey(key, stored) || err != nil {
 			writeErr(w, http.StatusUnauthorized, "email or password incorrect")
 			return
 		}

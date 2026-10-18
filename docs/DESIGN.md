@@ -216,10 +216,21 @@ receive time. Mesh relay delay is real and variable.
 
 ## 6. Server
 
+> **Decision, 2026-10-18.** The hosted version runs on Cloudflare. Workers run
+> only JavaScript or WebAssembly, and the PRD forbids two codebases, so the Go
+> server compiles two ways: natively with SQLite for self-host, and to
+> WebAssembly (via `github.com/syumai/workers-go`) for a Worker using **D1**,
+> which is SQLite too. One schema, one set of statements, two
+> `database/sql` drivers. D1 replaces the Postgres below. Measured: 2.2 MB
+> compressed WASM, under the free plan's limit. Two D1 constraints shape the
+> store: no transactions, and at most 100 bound parameters per statement.
+> Cold-start time on Workers is unmeasured until the first deploy.
+
 ### 6.1 Storage
 
-**SQLite via `modernc.org/sqlite`** (pure Go) for self-host; Postgres for SaaS,
-behind one repository interface.
+**SQLite via `modernc.org/sqlite`** (pure Go) for self-host; D1 for the hosted
+version (see the decision above; Postgres was the original plan), behind one
+repository interface.
 
 The pure-Go driver is not incidental: the existing build is
 `CGO_ENABLED=0 -ldflags '-extldflags "-static"'` into a scratch container, and
@@ -297,6 +308,10 @@ container, rootless Podman, non-root UID.
 
 New: the PWA is a static bundle. Serve it from the same Go binary via
 `embed.FS` so self-hosting stays a single artifact with no separate web server.
+
+Hosted: `cmd/worker` built with `GOOS=js GOARCH=wasm`, loaded by the shim
+`workers-assets-gen` generates, with `web/` as the Worker's static assets so
+only `/api/*` reaches the WASM. `wrangler.jsonc` at the repository root.
 
 ## 10. Phase 1 deliverables
 

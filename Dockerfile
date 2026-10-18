@@ -1,48 +1,42 @@
-# Build stage
-FROM golang:1.25.1-alpine3.22 AS builder
+# Self-hosted FetchFido: the API and the PWA in one static binary, in a scratch
+# image, as a non-root user. Same shape as the earlier prototype on main.
+#
+# Build:  podman build -t fetchfido .
+# Run:    podman run -d -p 8080:8080 -v fetchfido-data:/data fetchfido
+#
+# The database lives at /data/fetchfido.db; mount a volume there or the
+# positions vanish with the container. See README.md for the environment.
 
-# Install UPX for binary compression
-RUN apk add --no-cache upx
+FROM docker.io/library/golang:1.26.1-alpine3.22 AS builder
 
-# Set working directory
-WORKDIR /app
+WORKDIR /src
 
-# Copy go mod files
-COPY go.mod ./
-
-# Download dependencies and create go.sum
+# Dependencies first so they cache independently of the source.
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
-COPY main.go ./
-COPY templates/ ./templates/
-COPY static/ ./static/
+COPY embed.go ./
+COPY cmd/fetchfido ./cmd/fetchfido
+COPY internal ./internal
+COPY web ./web
 
-# Build the application with security flags and optimizations
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
-    -ldflags '-extldflags "-static" -w -s' \
-    -trimpath \
-    -o fetchfido .
+# Pure Go throughout (modernc.org/sqlite has no C), so CGO stays off and the
+# result is a fully static binary that needs nothing from an OS image.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/fetchfido ./cmd/fetchfido
 
-# Compress binary with UPX for maximum size reduction
-RUN upx --best --lzma fetchfido
+# scratch has no mkdir, so the data directory is prepared here and copied in
+# owned by the runtime user. 65534 is "nobody".
+RUN mkdir -p /out/data && chown 65534:65534 /out/data
 
-# Final stage - scratch (minimal possible image)
 FROM scratch
 
-# Copy the compressed binary from builder stage
-COPY --from=builder /app/fetchfido /fetchfido
+COPY --from=builder /out/fetchfido /fetchfido
+COPY --from=builder --chown=65534:65534 /out/data /data
 
-# Copy templates and static files
-COPY --from=builder /app/templates /templates
-COPY --from=builder /app/static /static
+# TLS roots are not needed: the server makes no outbound connections.
 
-# Expose ports
+VOLUME ["/data"]
 EXPOSE 8080
-EXPOSE 9999/udp
 
-# Run as non-root user
 USER 65534:65534
-
-# Run the application
 ENTRYPOINT ["/fetchfido"]

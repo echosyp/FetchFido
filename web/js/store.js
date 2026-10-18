@@ -14,7 +14,7 @@
 /** @typedef {import('./meshtastic.js').Position} Position */
 
 const DB_NAME = 'fetchfido';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 /** @type {IDBDatabase|null} */
 let db = null;
@@ -33,6 +33,10 @@ export function open() {
       }
       if (!d.objectStoreNames.contains('devices')) {
         d.createObjectStore('devices', { keyPath: 'deviceId' });
+      }
+      // v2: positions heard but not yet delivered to a server (DESIGN 5.3).
+      if (!d.objectStoreNames.contains('outbox')) {
+        d.createObjectStore('outbox', { keyPath: ['deviceId', 'ts'] });
       }
     };
     req.onsuccess = () => { db = req.result; resolve(db); };
@@ -56,17 +60,63 @@ function wrap(req) {
  * Store a position. Returns false when this exact (device, timestamp) was
  * already held -- the caller uses that to count duplicate mesh deliveries,
  * which is a useful signal about relay behaviour during a range test.
+ *
+ * A new position also enters the outbox unless `queue` is false, which is how
+ * positions pulled *from* the server avoid being sent straight back to it.
  * @param {Position} p
+ * @param {boolean} [queue]
  * @returns {Promise<boolean>}
  */
-export async function putPosition(p) {
+export async function putPosition(p, queue = true) {
   const d = await open();
-  const tx = d.transaction('positions', 'readwrite');
+  const tx = d.transaction(['positions', 'outbox'], 'readwrite');
   const store = tx.objectStore('positions');
   const existing = await wrap(store.get([p.deviceId, p.ts]));
   if (existing) return false;
   await wrap(store.put(p));
+  if (queue) await wrap(tx.objectStore('outbox').put(p));
   return true;
+}
+
+/**
+ * Oldest queued positions, up to limit.
+ * @param {number} limit
+ * @returns {Promise<Position[]>}
+ */
+export async function outboxPeek(limit) {
+  const d = await open();
+  const store = d.transaction('outbox', 'readonly').objectStore('outbox');
+  /** @type {Position[]} */
+  const out = await wrap(store.getAll(undefined, limit));
+  return out;
+}
+
+/** @param {[string, number][]} keys */
+export async function outboxRemove(keys) {
+  if (keys.length === 0) return;
+  const d = await open();
+  const tx = d.transaction('outbox', 'readwrite');
+  const store = tx.objectStore('outbox');
+  await Promise.all(keys.map((k) => wrap(store.delete(k))));
+}
+
+/** @returns {Promise<number>} */
+export async function outboxCount() {
+  const d = await open();
+  return wrap(d.transaction('outbox', 'readonly').objectStore('outbox').count());
+}
+
+/**
+ * Queue a device's whole local track. Used when a collar is claimed after its
+ * positions were heard, so the server receives the history it had refused.
+ * @param {string} deviceId
+ */
+export async function enqueueTrack(deviceId) {
+  const list = await track(deviceId);
+  const d = await open();
+  const tx = d.transaction('outbox', 'readwrite');
+  const store = tx.objectStore('outbox');
+  await Promise.all(list.map((p) => wrap(store.put(p))));
 }
 
 /**
@@ -138,11 +188,12 @@ export async function allDevices() {
   return wrap(store.getAll());
 }
 
-/** Clear the session. */
+/** Clear the session, including anything not yet synced. */
 export async function clear() {
   const d = await open();
-  const tx = d.transaction('positions', 'readwrite');
+  const tx = d.transaction(['positions', 'outbox'], 'readwrite');
   await wrap(tx.objectStore('positions').clear());
+  await wrap(tx.objectStore('outbox').clear());
 }
 
 /** Forget stored node names too. */

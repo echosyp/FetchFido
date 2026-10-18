@@ -14,7 +14,7 @@
  * an area is available offline when it has not been visited.
  */
 
-const SHELL = 'fetchfido-shell-v20';
+const SHELL = 'fetchfido-shell-v21';
 const TILES = 'fetchfido-tiles-v1';
 
 const SHELL_FILES = [
@@ -33,6 +33,7 @@ const SHELL_FILES = [
   './js/protobuf.js',
   './js/framing.js',
   './js/provision.js',
+  './js/sync.js',
   './js/heading.js',
   './js/awake.js',
   './js/sources/base.js',
@@ -63,6 +64,10 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
+
+  // The API is live data and must never be answered from a cache; a stale
+  // /api/v1/me would show the wrong sign-in state after a login.
+  if (url.pathname.startsWith('/api/')) return;
 
   if (url.hostname === 'tile.openstreetmap.org') {
     event.respondWith(

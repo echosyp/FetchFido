@@ -1,0 +1,10 @@
+.git
+.idea
+.claude
+build
+fetchfido
+web/test
+web/README.md
+web/package.json
+docs
+tools

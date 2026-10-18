@@ -47,6 +47,18 @@ needs:
   server, DESIGN §2), since the phone will not always be in range of the mesh.
 - The same code as self-host, no feature gating (PRD §11).
 
+**Status (2026-10-18):** server built (`cmd/`, `internal/`), with the
+decision recorded in DESIGN §6: one Go codebase, native + SQLite in a scratch
+container for self-host, WebAssembly + D1 in a Cloudflare Worker for the hosted
+version. Accounts, claiming as a hard gate, tenant isolation in the store,
+retention, CSV export; the PWA syncs its outbox, pulls history and claims
+collars. Container verified end to end locally; image tagged
+`quay.io/f0c8bbv93/fetchfido`. **Remaining:** the first real Worker deploy
+(item 3) to confirm D1 driver behaviour and cold start; gateway ingest from the
+community mesh, since positions reach the server only through phones today;
+account recovery (there is no email sending, so no password reset yet); a
+per-device rate limit on sync.
+
 ## 3. Auto-deploy the public version on Cloudflare Workers
 
 Continuous deployment so a push to this branch publishes the public version.
@@ -56,3 +68,8 @@ code), deployed from CI on every push, with `_headers` behaviour preserved.
 Keep the no-package-manager constraint in mind when choosing how the deploy
 runs: prefer Cloudflare's git integration or a pinned, hash-verified CLI over a
 dependency tree.
+
+**Status (2026-10-18):** `wrangler.jsonc` and `make worker` exist and build.
+Not yet done: create the D1 database and paste its id into `wrangler.jsonc`,
+connect the repository to Workers Builds (build command `make worker`, Go
+toolchain present), and the first deploy.

@@ -1,202 +1,122 @@
 # FetchFido
 
-A security-hardened Go web service for receiving and visualizing GPS data over UDP. Built for learning Podman/Kubernetes deployment with a focus on security best practices and minimal container footprint.
+An open, self-hostable dog tracker. Collars are stock Meshtastic nodes; a phone
+shows where your dog is, with or without cell service, with or without a mesh
+of your own, and with or without a server. See `docs/PRD.md` for the product
+and `docs/DESIGN.md` for the architecture.
 
-## Features
+This repository holds two things that ship together:
 
-- **UDP Data Reception**: Listens for GPS coordinates and arbitrary data over UDP
-- **Real-time GPS Visualization**: Interactive map powered by Leaflet.js displaying GPS locations
-- **Multiple GPS Format Support**:
-  - JSON format: `{"lat": 40.7128, "lon": -74.0060}`
-  - Comma-separated: `40.7128,-74.0060`
-  - Space-separated: `40.7128 -74.0060`
-- **TLS 1.3 Support**: Optional HTTPS encryption for secure communication
-- **Health & Info Endpoints**: Standard `/health` and `/info` endpoints for monitoring
-- **Security Hardened**: Runs in a scratch container as non-root user (UID 65534)
-- **Minimal Footprint**: UPX-compressed binary in scratch container for smallest possible image size
+- **The app** (`web/`): an offline-first PWA that talks to a Meshtastic radio
+  over Bluetooth, USB or WiFi, plots collars on a map, and can set a stock node
+  up as a collar in one step. No bundler, no `node_modules`; every byte a
+  browser runs is in this tree. Its own README is `web/README.md`.
+- **The server** (`cmd/`, `internal/`): one Go codebase, built two ways.
+  Self-hosted, it is a static binary in a scratch container with SQLite,
+  serving the app and the API from one port. Hosted, the same code compiles to
+  WebAssembly and runs in a Cloudflare Worker with D1. Same API, same SQL,
+  no feature gating between the two (`docs/PRD.md` section 11).
 
-## Quick Start
+The server is a sync target, never a dependency: the app tracks exactly the
+same with no server at all. What a server adds is history that survives the
+phone, and seeing what other phones or gateways heard.
 
-### Prerequisites
+## Self-hosting
 
-- Go 1.21+
-- Node.js (for npm scripts)
-- Podman or Docker
-
-### Run Locally (Development)
-
-```bash
-# Build and run directly with Go
-npm run build
-npm run run
-
-# Or use Go commands directly
-go build -o fetchfido .
-./fetchfido
-```
-
-The application will be available at:
-- Web UI: http://127.0.0.1:8080
-- UDP Listener: 127.0.0.1:9999
-
-### Run with Container
+Privacy is the point of self-hosting: positions stay on a machine you control,
+and there are no accounts to create. The server runs in **single mode**, one
+tenant, and stores everything the app uploads.
 
 ```bash
-# Build and run container
-npm run dev
-
-# Or step by step:
-npm run container:build
-npm run container:run
+podman build -t fetchfido .
+podman run -d --name fetchfido -p 8080:8080 \
+  -v fetchfido-data:/data \
+  -e ACCESS_TOKEN=change-me \
+  fetchfido
+# open http://<host>:8080 and enter the token under the sync badge
 ```
 
-## Sending GPS Data
+A prebuilt image is published to `quay.io/f0c8bbv93/fetchfido`.
 
-Send GPS coordinates to the UDP port (default: 9999):
+| Variable | Default | Meaning |
+|---|---|---|
+| `LISTEN` | `:8080` | Address to serve on |
+| `DB_PATH` | `/data/fetchfido.db` | SQLite file; mount a volume at `/data` |
+| `AUTH_MODE` | `single` | `single` (no accounts) or `accounts` |
+| `ACCESS_TOKEN` | *(none)* | Single mode: required from every client when set. **Set it** unless the port is only reachable from a trusted network; the startup log warns otherwise. |
+| `REGISTRATION` | `open` | Accounts mode: `open` or `closed` |
+| `RETENTION_DAYS` | `30` | Positions older than this are deleted on each sync. `0` keeps forever. |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | *(none)* | Serve HTTPS directly. Otherwise put a reverse proxy in front. |
+| `SECURE_COOKIES` | auto | Force the `Secure` flag when a proxy terminates TLS |
+| `PBKDF2_ITERATIONS` | `600000` | Accounts mode password hashing cost |
 
-```bash
-# Using netcat (JSON format)
-echo '{"lat": 40.7128, "lon": -74.0060}' | nc -u localhost 9999
+The container is `FROM scratch`, runs as UID 65534, has no shell, and makes no
+outbound connections. The binary is pure Go (`modernc.org/sqlite`), so
+`CGO_ENABLED=0` and the image is the binary plus an empty `/data`.
 
-# Using Python
-python test_gps.py
+HTTPS matters for more than privacy: the app's Bluetooth and serial transports,
+geolocation and offline install all need a secure context. Over plain http
+they work only from `127.0.0.1`. `web/README.md` covers the trade-offs.
 
-# Comma-separated format
-echo "40.7128,-74.0060" | nc -u localhost 9999
-```
+## The hosted version
 
-## API Endpoints
+Same code, **accounts mode**: email and password, one tenant per account, and
+only collars you have claimed are stored, so a stranger's node heard on the
+public mesh never becomes a record in your account. It runs as a Cloudflare
+Worker: `cmd/worker` compiled to WebAssembly, D1 for storage, the PWA served
+from `web/` as static assets. Configuration is `wrangler.jsonc`; build with
+`make worker`. Deployment is `docs/TODO.md` item 3.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Web UI with GPS map and message list |
-| `/health` | GET | Health check endpoint (JSON) |
-| `/info` | GET | Service information (JSON) |
-| `/messages` | GET | All received messages as JSON |
-| `/gps-data.js` | GET | GPS data as JavaScript (template) |
-| `/static/*` | GET | Static assets (CSS, JS) |
+## API
 
-## Configuration
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8080` | HTTP/HTTPS server port |
-| `LISTEN_PORT` | `9999` | UDP listener port |
-| `LISTEN_IP` | `127.0.0.1` | Bind address for all listeners |
-| `APP_VERSION` | `1.0.0` | Application version |
-| `APP_ENV` | `development` | Environment name |
-| `TLS_CERT_FILE` | - | Path to TLS certificate (enables HTTPS) |
-| `TLS_KEY_FILE` | - | Path to TLS private key (enables HTTPS) |
-
-## TLS/HTTPS Support
-
-FetchFido supports TLS 1.3 for secure communication. See [TLS.md](TLS.md) for detailed configuration.
-
-### Quick TLS Setup
-
-```bash
-# Generate self-signed certificate (testing only)
-mkdir -p ./certs
-openssl req -x509 -newkey rsa:4096 -keyout ./certs/privkey.pem \
-  -out ./certs/fullchain.pem -days 365 -nodes -subj "/CN=localhost"
-
-# Run with TLS
-npm run container:run-tls
-```
-
-For production, use Let's Encrypt certificates. See [TLS.md](TLS.md) for instructions.
-
-## Container Commands
-
-### Basic Operations
-```bash
-npm run container:build          # Build container image
-npm run container:run            # Run without TLS
-npm run container:run-detached   # Run in background (HTTP)
-npm run container:stop           # Stop running container
-npm run container:clean          # Remove container
-```
-
-### TLS Operations
-```bash
-npm run container:run-tls              # Run with TLS
-npm run container:run-tls-detached     # Run with TLS in background
-```
-
-### Kubernetes
-```bash
-npm run k8s:deploy               # Deploy to Kubernetes
-npm run k8s:delete               # Remove from Kubernetes
-```
-
-## Project Structure
+Both deployments serve `/api/v1`:
 
 ```
-FetchFido/
-├── main.go                 # Main application code
-├── go.mod                  # Go module definition
-├── Dockerfile              # Multi-stage container build
-├── package.json            # npm scripts for convenience
-├── TLS.md                  # TLS configuration guide
-├── templates/
-│   ├── index.html          # Main web UI template
-│   └── gps-data.js         # GPS data JavaScript template
-├── static/
-│   ├── css/
-│   │   └── style.css       # Application styles
-│   └── js/
-│       └── app.js          # Client-side JavaScript
-└── test_gps.py             # GPS testing utility
+GET  /api/v1/health
+GET  /api/v1/me                      mode, sign-in state, retention
+POST /api/v1/auth/register           accounts mode
+POST /api/v1/auth/login              {email,password} or {token}
+POST /api/v1/auth/logout
+GET  /api/v1/devices
+POST /api/v1/devices/claim           {nodeId, name, shortName, colour}
+DELETE /api/v1/devices/{nodeId}      also deletes its positions
+POST /api/v1/sync                    {positions:[...]}, idempotent on (device, ts)
+GET  /api/v1/positions?device=&from=&to=&limit=
+GET  /api/v1/export?format=csv
 ```
 
-## Security Features
-
-- **Non-root User**: Container runs as UID/GID 65534
-- **Scratch Base**: Minimal attack surface using scratch container
-- **TLS 1.3 Only**: When TLS is enabled, only TLS 1.3 is accepted
-- **Static Binary**: Fully static binary with no external dependencies
-- **UPX Compression**: Binary compressed for minimal size
-- **Read-only Mounts**: TLS certificates mounted read-only
+Writes require JSON and a same-origin request; sessions are HttpOnly cookies.
+Tenant isolation is enforced in `internal/store`, not in handlers.
 
 ## Development
 
-### Testing GPS Functionality
-
 ```bash
-# Basic GPS test
-python test_gps.py
-
-# Manual GPS testing
-python test_manual_gps.py
-
-# Verify GPS parsing
-python verify_fix.py
+make test       # gofmt, go vet, go test, and the web test suites (node)
+make native     # ./fetchfido, the self-host binary
+make worker     # build/app.wasm plus the Worker shim
+make image      # the scratch container, tagged with the git SHA
 ```
 
-### Building
+Go 1.24+ and Node 18+ (for the web tests only). Dependencies are Go modules
+pinned in `go.sum`: `modernc.org/sqlite` and `github.com/syumai/workers-go`.
+Nothing is installed from npm.
 
-```bash
-# Build Go binary
-go build -o fetchfido .
+## Layout
 
-# Build optimized binary (like Docker build)
-CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
-  -ldflags '-extldflags "-static" -w -s' -trimpath -o fetchfido .
+```
+web/            the PWA (see web/README.md)
+cmd/fetchfido   self-hosted server entry point
+cmd/worker      Cloudflare Worker entry point (GOOS=js GOARCH=wasm)
+internal/api    the HTTP API, both deployments
+internal/store  schema and queries, SQLite dialect, tenant isolation
+internal/auth   password hashing and session tokens
+embed.go        embeds web/ into the native binary
+Dockerfile      scratch container
+wrangler.jsonc  Worker configuration
+docs/           PRD, design, to-do
+tools/          field-test analysis
 ```
 
-## Technology Stack
+## Licence
 
-- **Backend**: Go 1.21+
-- **Frontend**: HTML5, JavaScript, Leaflet.js 1.9.4
-- **Container**: Podman/Docker (scratch-based)
-- **Protocols**: HTTP/HTTPS, UDP
-
-## License
-
-See project repository for license information.
-
-## Contributing
-
-This project is designed for learning Podman/Kubernetes deployment. Contributions welcome!
+MIT. See `LICENSE`.

@@ -34,6 +34,7 @@ js/sources/wifi.js  HTTP transport (the only one iOS can use)
 js/sources/serial.js Web Serial transport (cable; preferred off-grid)
 js/framing.js       Meshtastic stream framing (serial only)
 js/provision.js     configure the connected node as a collar (AdminMessages)
+js/sync.js          outbox upload, server pull, accounts and claims
 js/store.js         IndexedDB, deduped on [deviceId, ts]
 js/geo.js           distance, bearing, relative bearing, freshness
 js/heading.js       device compass (DeviceOrientation)
@@ -124,23 +125,35 @@ extracts frames, discards log text, and resynchronises after noise. Discarded
 lines are kept in `SerialSource.log` -- useful when nothing else explains a
 silence.
 
-## Deploying to Cloudflare Pages
+## Syncing to a server
 
-Static files, no build step. The whole `web/` directory is the site.
+When the page is served by the FetchFido server (the self-hosted container or
+the hosted Worker) the badge at the right of the header shows sync state and
+opens the account dialog. Served by anything else, it reads **no server** and
+the app behaves exactly as before.
 
-**Settings:** build command *empty*, build output directory `web`.
+Every position heard goes into an outbox in IndexedDB and is uploaded in
+batches; the server deduplicates on (device, timestamp), so retries are safe.
+Positions the server already holds, uploaded by another phone or a gateway,
+are pulled back and shown. Marking a node as a **collar** also claims it on
+the server. On the hosted version that claim is what allows its positions to
+be stored at all; positions from unclaimed nodes wait in the outbox and are
+delivered once claimed, so nothing heard before the claim is lost.
 
-Two ways in, both avoiding a package manager:
+Self-hosted servers run in single mode: no accounts, everything stored, and an
+access token if the operator set one. See the root `README.md`.
 
-1. **Direct upload** — drag `web/` into the Pages dashboard. Fastest, nothing
-   to push.
-2. **Git integration** — push the branch and point Pages at it; every push
-   redeploys.
+## Deploying the hosted version
+
+The hosted version is a Cloudflare Worker: the Go API compiled to WebAssembly,
+with this directory served as the Worker's static assets. `wrangler.jsonc` at
+the repository root configures it and `make worker` builds it.
 
 `_headers` sets what the meta CSP cannot: `frame-ancestors`, which browsers
 ignore in a `<meta>` tag. It also marks `sw.js` and the app shell
 `no-cache` -- a CDN-cached service worker cannot update itself and would strand
-visitors on whatever build they first loaded.
+visitors on whatever build they first loaded. The self-hosted binary sets the
+same headers itself.
 
 ### The trade HTTPS makes
 
@@ -158,41 +171,8 @@ plain http -- that is mixed content, and no CSP setting overrides it. So:
 | Geolocation, compass | yes | only on 127.0.0.1 |
 | Install, offline | yes | only on 127.0.0.1 |
 
-Keep the local server for range testing over WiFi; use the hosted copy for
-field work over cable or Bluetooth. They are not redundant.
-
-## Setting up a collar
-
-**Set up collar** configures the radio that is *currently connected* as a
-tracker on the public mesh, so a stock Meshtastic node becomes a collar
-without touching the official app. Connect the collar node (cable is
-simplest), open the dialog, give it the dog's name, apply; it saves, reboots
-and drops the link. Then connect your own radio again to watch it.
-
-What it writes, as AdminMessages over the live transport:
-
-| Setting | Value | Why |
-|---|---|---|
-| Owner | the dog's name, marked unmessagable | so radios show a dog, not a person to chat with |
-| Channel 0 | LongFast, default key, full position precision | the public mesh; coarsened positions cannot find a dog |
-| Device role | TRACKER, no rebroadcast | priority positions; a collar is a poor relay |
-| Position | smart broadcast, GPS on, 30 s moving / 300 s resting / 30 m | the airtime budget in docs/DESIGN.md §3.2 |
-| LoRa | LongFast preset, region kept or chosen, TX on | must match the community mesh |
-
-Each block is **read first and patched**, not overwritten: a `set_config`
-carries the whole block, so sending only the role would zero every other
-setting, including ones this code has never heard of. The node's current bytes
-are sent back with the few fields that matter replaced. Writes happen inside
-an edit transaction, are **read back and compared** before commit, and nothing
-is committed if the node did not take a setting. The dialog reports each step.
-
-A node with no region set is refused unless one is chosen: the wrong band is
-both illegal and deaf to the mesh, and guessing is worse than asking.
-
-The field numbers come from the published schema. **Not yet run against
-hardware**: whether current firmware accepts position precision 32 as "full",
-and whether local admin needs the session passkey this sends regardless. Both
-are marked `[verify]` in `js/provision.js`.
+Keep a local http server for range testing over WiFi; use the hosted copy, or
+a self-hosted one behind TLS, for field work over cable or Bluetooth.
 
 ## Surviving a walk
 
@@ -245,6 +225,7 @@ node web/test/framing.test.mjs  # serial stream framing
 node web/test/geo.test.mjs      # distance, bearing, arrow rotation
 node web/test/serial.test.mjs   # port matching for replug recovery
 node web/test/provision.test.mjs # collar setup against a fake node
+node web/test/sync.test.mjs      # outbox and account flow against a fake server
 ```
 
 These build synthetic Meshtastic frames byte by byte and assert the decoder
@@ -318,7 +299,7 @@ Written but NOT yet run against hardware: collar setup (`js/provision.js`).
 The conversation is tested against a fake node that behaves like firmware;
 the firmware itself has the final say.
 
-Not built: server transport, geofencing, device claiming, dog profiles,
-pre-cached offline map regions, any server at all.
+Not built: geofencing, dog profiles, pre-cached offline map regions, gateway
+ingest from the community mesh (positions reach the server only via phones).
 
 Planned work beyond the current client is tracked in `docs/TODO.md`.

@@ -44,6 +44,7 @@
   <span id="geo" class="geo"></span>
   <span id="awake" class="awake"></span>
   <span id="stats" class="stats"></span>
+  <button id="account-open" class="sync off" type="button" title="Server sync and account">no server</button>
 </header>
 
 <div class="diagbar"><span id="diag" class="diag"></span></div>
@@ -109,6 +110,31 @@
     <div class="setup-actions">
       <button type="button" id="setup-cancel">Close</button>
       <button type="button" id="setup-apply">Apply to radio</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="account" class="setup">
+  <form id="account-form" novalidate>
+    <h2>Server</h2>
+    <p id="account-info" class="hint"></p>
+    <div id="account-fields">
+      <label id="account-email-row">Email
+        <input id="account-email" type="text" inputmode="email" autocomplete="username">
+      </label>
+      <label id="account-password-row">Password <small>(10 characters or more)</small>
+        <input id="account-password" type="password" autocomplete="current-password">
+      </label>
+      <label id="account-token-row">Access token
+        <input id="account-token" type="password" autocomplete="off">
+      </label>
+    </div>
+    <p id="account-error" class="hint error"></p>
+    <div class="setup-actions">
+      <button type="button" id="account-cancel">Close</button>
+      <button type="button" id="account-logout">Sign out</button>
+      <button type="button" id="account-register">Create account</button>
+      <button type="button" id="account-login">Sign in</button>
     </div>
   </form>
 </dialog>

@@ -16,6 +16,7 @@ import {
   myInfo, onAdmin, nodeId, REGION_NAMES,
 } from './meshtastic.js';
 import { provisionTracker, DEFAULTS as CADENCE } from './provision.js';
+import { Sync } from './sync.js';
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, formatAge, freshness, colourFor, relativeBearing } from './geo.js';
 import { Compass } from './heading.js';
@@ -47,6 +48,16 @@ let hideInfra = false;
 
 const heading = new Compass();
 const awake = new Awake();
+
+/**
+ * Server sync. Off unless the page came from a FetchFido server; the app
+ * tracks exactly the same either way (docs/DESIGN.md section 1).
+ */
+const sync = new Sync({
+  peek: store.outboxPeek,
+  remove: store.outboxRemove,
+  count: store.outboxCount,
+});
 
 /** Render timer, throttled while the page is hidden. */
 let renderTimer = /** @type {ReturnType<typeof setInterval>|null} */ (null);
@@ -224,6 +235,13 @@ async function boot() {
 
   el('nav-close').addEventListener('click', () => selectDevice(null));
   wireSetup();
+  wireAccount();
+
+  sync.onStatus(renderSync);
+  // Positions other phones or gateways uploaded. Not re-queued for upload.
+  sync.onPull((p) => void onPosition(p, false));
+  // Not awaited: a slow or absent server must not delay the map.
+  void sync.start();
 
   heading.onChange(renderNav);
 
@@ -369,6 +387,7 @@ async function runSetup() {
     primeNodeName(out.nodeId, { long: longName.trim(), short: shortName.trim() });
     void store.putDevice(out.nodeId, { role: 'collar', long: longName.trim(), short: shortName.trim() })
       .catch((err) => console.warn('collar save failed', err));
+    void claimOnServer(out.nodeId);
 
     note('done', `${out.nodeId} is now "${longName.trim()}" on ${out.preset} / ${out.region}. ` +
       'Disconnecting — connect your own radio to watch it.');
@@ -380,6 +399,107 @@ async function runSetup() {
     note('error', err instanceof Error ? err.message : String(err));
     apply.disabled = false;
   }
+}
+
+/** @param {string} id */
+async function claimOnServer(id) {
+  if (!sync.ready) return;
+  try {
+    const ok = await sync.claim(id, labelFor(id), nodeNames.get(id)?.short || '');
+    if (ok) {
+      await store.enqueueTrack(id);
+      await sync.flush();
+    }
+  } catch (err) {
+    console.warn('claim failed', err);
+  }
+}
+
+/**
+ * The sync badge in the header. It is also the account button.
+ * @param {import('./sync.js').SyncState} state
+ * @param {string} detail
+ * @param {number} pending
+ */
+function renderSync(state, detail, pending) {
+  const b = /** @type {HTMLButtonElement} */ (el('account-open'));
+  b.className = 'sync ' + state;
+  b.title = detail || '';
+  switch (state) {
+    case 'off': b.textContent = 'no server'; break;
+    case 'needs-login': b.textContent = detail || 'sign in'; break;
+    case 'syncing': b.textContent = `syncing ${pending}`; break;
+    case 'error': b.textContent = pending ? `sync error · ${pending} queued` : 'sync error'; break;
+    default:
+      b.textContent = pending ? `${pending} queued`
+        : sync.info?.email ? sync.info.email : 'synced';
+  }
+}
+
+/** The server / account dialog. */
+function wireAccount() {
+  const dialog = /** @type {HTMLDialogElement} */ (el('account'));
+  const show = (/** @type {string} */ id, /** @type {boolean} */ on) => { el(id).hidden = !on; };
+  const error = (/** @type {string} */ msg) => { el('account-error').textContent = msg; };
+
+  const fill = () => {
+    const info = sync.info;
+    error('');
+    const accounts = info?.mode === 'accounts';
+    const signedIn = !!info?.authenticated;
+    const needsToken = !!info && info.mode === 'single' && info.tokenRequired;
+
+    el('account-info').textContent = !info
+      ? 'This page is not served by a FetchFido server, so there is nothing to sync to. ' +
+        'Tracking works exactly the same without one. See README.md to run a server, or use the hosted version.'
+      : accounts && signedIn
+        ? `Signed in as ${info.email}. Positions from collars you mark are stored for ${info.retentionDays || 'unlimited'} days.`
+      : accounts
+        ? 'Sign in to sync positions to your account. Only collars you mark are stored; strangers\' nodes heard on the mesh are not.'
+      : needsToken && !signedIn
+        ? 'This self-hosted server requires its access token.'
+        : `Connected to a self-hosted server. Everything heard is stored, for ${info.retentionDays || 'unlimited'} days.`;
+
+    show('account-fields', !!info && !signedIn);
+    show('account-email-row', accounts && !signedIn);
+    show('account-password-row', accounts && !signedIn);
+    show('account-token-row', needsToken && !signedIn);
+    show('account-login', !!info && !signedIn && (accounts || needsToken));
+    show('account-register', accounts && !signedIn && !!info?.registration);
+    show('account-logout', signedIn && (accounts || needsToken));
+  };
+
+  el('account-open').addEventListener('click', async () => {
+    await sync.probe();
+    fill();
+    dialog.showModal();
+  });
+  el('account-cancel').addEventListener('click', () => dialog.close());
+  el('account-form').addEventListener('submit', (e) => e.preventDefault());
+
+  const run = async (/** @type {() => Promise<void>} */ fn) => {
+    error('');
+    const btns = dialog.querySelectorAll('button');
+    btns.forEach((b) => { b.disabled = true; });
+    try {
+      await fn();
+      fill();
+    } catch (err) {
+      error(err instanceof Error ? err.message : String(err));
+    } finally {
+      btns.forEach((b) => { b.disabled = false; });
+    }
+  };
+  const email = () => /** @type {HTMLInputElement} */ (el('account-email')).value;
+  const password = () => /** @type {HTMLInputElement} */ (el('account-password')).value;
+  const token = () => /** @type {HTMLInputElement} */ (el('account-token')).value;
+
+  el('account-login').addEventListener('click', () => void run(async () => {
+    if (sync.info?.mode === 'accounts') await sync.login(email(), password());
+    else await sync.loginToken(token());
+  }));
+  el('account-register').addEventListener('click', () => void run(() => sync.register(email(), password())));
+  el('account-logout').addEventListener('click', () => void run(() => sync.logout()));
 }
 
 /**
@@ -422,10 +542,14 @@ async function restore() {
   }
 }
 
-/** @param {Position} p */
-async function onPosition(p) {
+/**
+ * @param {Position} p
+ * @param {boolean} [local] heard by this phone (queue for upload), as opposed
+ *   to pulled from the server
+ */
+async function onPosition(p, local = true) {
   stats.received++;
-  const isNew = await store.putPosition(p);
+  const isNew = await store.putPosition(p, local);
   if (!isNew) {
     // Same packet arriving by another mesh path. Expected, and a useful
     // measure of relay redundancy during a range test.
@@ -487,6 +611,10 @@ function toggleRole(id) {
   const next = roles.get(id) === 'infra' ? 'collar' : 'infra';
   roles.set(id, next);
   void store.putDevice(id, { role: next }).catch((err) => console.warn('role save failed', err));
+  // Marking a collar is also claiming it on the server, which is what lets
+  // its positions be stored there at all in accounts mode. The history heard
+  // before the claim is queued so the server gets it too.
+  if (next === 'collar') void claimOnServer(id);
   // Hiding the device you are navigating to would strand the arrow.
   if (next === 'infra' && hideInfra && selectedId === id) selectedId = null;
   render();

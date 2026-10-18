@@ -2,3 +2,7 @@
 .idea
 test_manual_gps.py
 verify_fix.py
+
+# Build outputs
+/build/
+/fetchfido

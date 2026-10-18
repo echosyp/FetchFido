@@ -283,3 +283,5 @@ are the off-grid path, so verifying them matters more than anything else here.
 
 Not built: server transport, geofencing, device claiming, dog profiles,
 pre-cached offline map regions, any server at all.
+
+Planned work beyond the current client is tracked in `docs/TODO.md`.

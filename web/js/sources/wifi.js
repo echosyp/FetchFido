@@ -148,6 +148,12 @@ export class WifiSource extends BaseSource {
     }
   }
 
+  /** @param {Uint8Array} payload */
+  async send(payload) {
+    if (!this._running) throw new Error('not connected');
+    await this._send(payload);
+  }
+
   /**
    * Send a ToRadio message.
    * @param {Uint8Array} payload

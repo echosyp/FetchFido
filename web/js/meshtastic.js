@@ -22,6 +22,11 @@
  * BLE confirmed 2026-08-05 from the hosted PWA: service UUID, all three
  * characteristics, and the notify-then-drain pattern all worked. Every
  * transport is now verified against real hardware.
+ *
+ * Enum tables and the admin / config field numbers were checked against the
+ * published schema (meshtastic/protobufs, master) on 2026-10-17. Schema
+ * agreement is not the same as hardware agreement: js/provision.js still
+ * carries [verify] where only a real node can settle the question.
  */
 
 import { Reader, WIRE, putVarint, putField } from './protobuf.js';
@@ -37,14 +42,20 @@ export const BLE = {
 export const PORTNUM = {
   POSITION_APP: 3,
   NODEINFO_APP: 4,
+  ADMIN_APP: 6,
 };
 
 /** FromRadio field numbers. */
 const FROM_RADIO = {
   PACKET: 2,
+  MY_INFO: 3,
   NODE_INFO: 4,
+  CONFIG: 5,
   CONFIG_COMPLETE_ID: 7,
 };
+
+/** MyNodeInfo field numbers. */
+const MY_NODE_INFO = { MY_NODE_NUM: 1 };
 
 /** NodeInfo field numbers. */
 const NODE_INFO = {
@@ -81,7 +92,7 @@ const MESH_PACKET = {
 /** Config oneof field numbers (FromRadio.config). */
 const CONFIG = { LORA: 6 };
 
-/** Config.LoRaConfig field numbers. [verify] */
+/** Config.LoRaConfig field numbers. Matches the published schema. */
 const LORA_CONFIG = {
   USE_PRESET: 1,
   MODEM_PRESET: 2,
@@ -93,23 +104,28 @@ const LORA_CONFIG = {
   TX_POWER: 10,
 };
 
-/** ModemPreset enum order. [verify] */
-const PRESET_NAMES = [
+/** ModemPreset enum, by value. From the published schema. */
+export const PRESET_NAMES = [
   'LongFast', 'LongSlow', 'VeryLongSlow', 'MediumSlow', 'MediumFast',
-  'ShortSlow', 'ShortFast', 'LongModerate', 'ShortTurbo',
+  'ShortSlow', 'ShortFast', 'LongModerate', 'ShortTurbo', 'LongTurbo',
+  'LiteFast', 'LiteSlow', 'NarrowFast', 'NarrowSlow', 'TinyFast', 'TinySlow',
+  'MediumTurbo',
 ];
 
-/** Region enum order. [verify] */
-const REGION_NAMES = [
+/** RegionCode enum, by value. From the published schema. */
+export const REGION_NAMES = [
   'UNSET', 'US', 'EU_433', 'EU_868', 'CN', 'JP', 'ANZ', 'KR', 'TW', 'RU',
   'IN', 'NZ_865', 'TH', 'LORA_24', 'UA_433', 'UA_868', 'MY_433', 'MY_919',
-  'SG_923',
+  'SG_923', 'PH_433', 'PH_868', 'PH_915', 'ANZ_433', 'KZ_433', 'KZ_863',
+  'NP_865', 'BR_902', 'ITU1_2M', 'ITU2_2M', 'EU_866', 'EU_874', 'EU_917',
+  'EU_N_868', 'ITU3_2M', 'ITU1_70CM', 'ITU2_70CM', 'ITU3_70CM', 'ITU2_125CM',
 ];
 
 /** Data field numbers. */
 const DATA = {
   PORTNUM: 1,
   PAYLOAD: 2,
+  REQUEST_ID: 6,
 };
 
 /** Position field numbers. All confirmed against real firmware. */
@@ -215,6 +231,39 @@ export const radioConfig = {
   preset: null, region: null, hopLimit: null, txPower: null,
   usePreset: null, bandwidth: null, spreadFactor: null,
 };
+
+/**
+ * The connected radio's own node number, from the MyNodeInfo the handshake
+ * delivers. Admin messages are addressed to it; until it is known the app
+ * cannot configure the node it is talking to.
+ * @type {{num: number|null}}
+ */
+export const myInfo = { num: null };
+
+/**
+ * @typedef {object} AdminReply
+ * @property {string} from       node ID the reply came from
+ * @property {number} requestId  the MeshPacket.id of the request it answers, 0 if none
+ * @property {Uint8Array} payload an encoded AdminMessage
+ */
+
+/** @type {((reply: AdminReply) => void)[]} */
+const adminCbs = [];
+
+/**
+ * Observe ADMIN_APP replies. The decoder routes them here instead of dropping
+ * them with the other non-position traffic, so js/provision.js can match a
+ * reply to the request it sent.
+ * @param {(reply: AdminReply) => void} cb
+ * @returns {() => void} unsubscribe
+ */
+export function onAdmin(cb) {
+  adminCbs.push(cb);
+  return () => {
+    const i = adminCbs.indexOf(cb);
+    if (i >= 0) adminCbs.splice(i, 1);
+  };
+}
 
 /**
  * @param {Uint8Array} buf a Config message
@@ -492,12 +541,20 @@ export function decodeFrames(body) {
       packets.push(r.bytes());
       return true;
     }
-    if (field === 5 && wire === WIRE.LEN) {   // FromRadio.config
+    if (field === FROM_RADIO.CONFIG && wire === WIRE.LEN) {
       try {
         readConfig(r.bytes());
       } catch (err) {
         console.warn('config decode failed', err);
       }
+      return true;
+    }
+    if (field === FROM_RADIO.MY_INFO && wire === WIRE.LEN) {
+      new Reader(r.bytes()).each((f, w, rr) => {
+        if (f !== MY_NODE_INFO.MY_NODE_NUM) return false;
+        myInfo.num = w === WIRE.I32 ? rr.u32() : rr.varint();
+        return true;
+      });
       return true;
     }
     // The handshake delivers the node database: names AND each node's last
@@ -605,8 +662,16 @@ function decodeMeshPacket(buf) {
     return null;
   }
 
-  const { portnum, payload } = decodeData(decoded);
+  const { portnum, payload, requestId } = decodeData(decoded);
   if (portnum >= 0) diag.portnums.set(portnum, (diag.portnums.get(portnum) || 0) + 1);
+
+  // Replies to our own configuration requests. Nothing here is a position,
+  // but dropping them would leave the provisioning flow waiting forever.
+  if (portnum === PORTNUM.ADMIN_APP && payload) {
+    const reply = { from: nodeId(from), requestId, payload };
+    for (const cb of adminCbs) cb(reply);
+    return null;
+  }
 
   // Live name announcements: a node renaming itself, or one that joined after
   // the handshake and so was absent from the node database.
@@ -653,21 +718,27 @@ function decodeMeshPacket(buf) {
 }
 
 /**
- * Unwrap Data into its portnum and payload.
+ * Unwrap Data into its portnum, payload and (for replies) the request it answers.
  * @param {Uint8Array} buf
- * @returns {{portnum: number, payload: Uint8Array|null}}
+ * @returns {{portnum: number, payload: Uint8Array|null, requestId: number}}
  */
 function decodeData(buf) {
   let portnum = -1;
   /** @type {Uint8Array|null} */ let payload = null;
+  let requestId = 0;
 
   new Reader(buf).each((field, wire, r) => {
     if (field === DATA.PORTNUM && wire === WIRE.VARINT) { portnum = r.varint(); return true; }
     if (field === DATA.PAYLOAD && wire === WIRE.LEN) { payload = r.bytes(); return true; }
+    if (field === DATA.REQUEST_ID) {
+      // Schema says fixed32; tolerate a varint encoder, as elsewhere.
+      requestId = wire === WIRE.I32 ? r.u32() : r.varint();
+      return true;
+    }
     return false;
   });
 
-  return { portnum, payload };
+  return { portnum, payload, requestId };
 }
 
 /**

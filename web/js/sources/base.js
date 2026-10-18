@@ -35,6 +35,17 @@ export class BaseSource {
     this._statusCbs.push(cb);
   }
 
+  /**
+   * Write one ToRadio message. Each transport frames and delivers it its own
+   * way; this default exists so a transport that cannot send fails loudly
+   * rather than being called into a void.
+   * @param {Uint8Array} _payload
+   * @returns {Promise<void>}
+   */
+  async send(_payload) {
+    throw new Error(`${this.name} transport cannot send`);
+  }
+
   /** @param {Position} p */
   _emit(p) {
     for (const cb of this._posCbs) cb(p);

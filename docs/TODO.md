@@ -23,6 +23,12 @@ config means the client needs the *ToRadio* side of the protocol, which
 `js/meshtastic.js` currently only decodes from; the admin messages must be
 encoded by hand as well, in keeping with the no-dependency stance.
 
+**Status (2026-10-17):** built in `web/js/provision.js` with a dialog in the
+app; see "Setting up a collar" in `web/README.md`. Tested against a fake node.
+**Remaining:** one session against real hardware to settle the `[verify]`
+markers (position precision 32, session passkey on local admin), and to
+confirm smart-broadcast's movement threshold behaves as DESIGN §3.2 wants.
+
 ## 2. Public hosted version with accounts and a community mesh
 
 A hosted FetchFido that anyone can log in to and track their own animals,

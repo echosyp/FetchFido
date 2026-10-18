@@ -201,6 +201,11 @@ export class SerialSource extends BaseSource {
   }
 
   /** @param {Uint8Array} payload */
+  async send(payload) {
+    await this._send(payload);
+  }
+
+  /** @param {Uint8Array} payload */
   async _send(payload) {
     if (!this._port?.writable) throw new Error('port not writable');
     const writer = this._port.writable.getWriter();

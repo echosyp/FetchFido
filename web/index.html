@@ -57,6 +57,7 @@
   <input id="address" type="text" inputmode="url" autocomplete="off"
          placeholder="192.168.1.50" aria-label="Node address" hidden>
   <button id="connect">Connect radio</button>
+  <button id="setup-open" disabled title="Configure the connected radio as a collar">Set up collar</button>
   <button id="filter">Showing all</button>
   <button id="fit">Fit all</button>
   <button id="export">Export CSV</button>
@@ -77,6 +78,40 @@
   </div>
   <button id="nav-close" class="nav-close" aria-label="Stop navigating">&times;</button>
 </div>
+
+<dialog id="setup" class="setup">
+  <form id="setup-form" novalidate>
+    <h2>Set up this radio as a collar</h2>
+    <p class="hint">
+      Configures the <strong>connected</strong> radio (<span id="setup-node"></span>)
+      to report its position on the public LongFast mesh as a tracker. Its other
+      settings are kept. When done it saves and reboots, which drops this link —
+      then connect your own radio again to watch it.
+    </p>
+    <label>Dog's name
+      <input id="setup-long" type="text" maxlength="39" autocomplete="off" placeholder="Fido">
+    </label>
+    <label>Short name <small>(4 characters, shown on radios)</small>
+      <input id="setup-short" type="text" maxlength="4" autocomplete="off" placeholder="FIDO">
+    </label>
+    <label>Region
+      <select id="setup-region"></select>
+    </label>
+    <fieldset class="cadence">
+      <legend>Report cadence</legend>
+      <label>Moving: every <input id="setup-moving" type="number" min="10" max="3600" step="5"> s</label>
+      <label>Resting: every <input id="setup-still" type="number" min="60" max="86400" step="30"> s</label>
+      <label>Moved means <input id="setup-move-m" type="number" min="10" max="1000" step="5"> m</label>
+      <p class="hint">Defaults fit several dogs on one mesh. One or two dogs can go faster
+        (docs/DESIGN.md §3.2).</p>
+    </fieldset>
+    <ol id="setup-log" class="setup-log"></ol>
+    <div class="setup-actions">
+      <button type="button" id="setup-cancel">Close</button>
+      <button type="button" id="setup-apply">Apply to radio</button>
+    </div>
+  </form>
+</dialog>
 
 <main>
   <div id="map"></div>

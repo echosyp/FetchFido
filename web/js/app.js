@@ -11,7 +11,11 @@ import { BleSource } from './sources/ble.js';
 import { WifiSource } from './sources/wifi.js';
 import { SerialSource } from './sources/serial.js';
 import * as store from './store.js';
-import { diag, labelFor, nodeNames, nodeStatus, onNodeName, primeNodeName, radioConfig } from './meshtastic.js';
+import {
+  diag, labelFor, nodeNames, nodeStatus, onNodeName, primeNodeName, radioConfig,
+  myInfo, onAdmin, nodeId, REGION_NAMES,
+} from './meshtastic.js';
+import { provisionTracker, DEFAULTS as CADENCE } from './provision.js';
 import { TrackMap } from './map.js';
 import { distance, bearing, compass, formatDistance, formatAge, freshness, colourFor, relativeBearing } from './geo.js';
 import { Compass } from './heading.js';
@@ -105,6 +109,8 @@ function makeSource(kind, address) {
     const btn = /** @type {HTMLButtonElement} */ (el('connect'));
     btn.textContent = state === 'connected' ? 'Disconnect' : 'Connect radio';
     btn.disabled = state === 'connecting';
+    // Configuring a node needs a live link to that node, nothing less.
+    /** @type {HTMLButtonElement} */ (el('setup-open')).disabled = state !== 'connected';
   });
 
   s.onPosition(onPosition);
@@ -217,6 +223,7 @@ async function boot() {
   syncFilter();
 
   el('nav-close').addEventListener('click', () => selectDevice(null));
+  wireSetup();
 
   heading.onChange(renderNav);
 
@@ -249,6 +256,130 @@ async function boot() {
   startRenderLoop();
   document.addEventListener('visibilitychange', startRenderLoop);
   render();
+}
+
+/** Human labels for the provisioning steps, in the order they run. */
+const SETUP_STEPS = {
+  read: 'Read current settings',
+  region: 'Region',
+  begin: 'Open edit session',
+  owner: 'Name',
+  channel: 'Public channel',
+  device: 'Tracker role',
+  position: 'Report cadence',
+  lora: 'Radio settings',
+  verify: 'Read back',
+  commit: 'Save and reboot',
+};
+
+/**
+ * The collar setup dialog (docs/TODO.md item 1).
+ *
+ * It acts on the radio that is connected right now, so the flow is: connect
+ * the collar, run this, then connect your own radio again. The dialog says so,
+ * because the natural assumption is that it configures some *other* node.
+ */
+function wireSetup() {
+  const dialog = /** @type {HTMLDialogElement} */ (el('setup'));
+  const regionEl = /** @type {HTMLSelectElement} */ (el('setup-region'));
+
+  const keep = document.createElement('option');
+  keep.value = '';
+  keep.textContent = "keep the radio's current region";
+  regionEl.append(keep);
+  REGION_NAMES.forEach((name, code) => {
+    if (code === 0 || name === 'UA_868') return;   // UNSET, and a deprecated code
+    const o = document.createElement('option');
+    o.value = String(code);
+    o.textContent = name.replace(/_/g, ' ');
+    regionEl.append(o);
+  });
+
+  el('setup-open').addEventListener('click', () => {
+    if (!source || source.status() !== 'connected') return;
+    // The handshake already told us this radio's region; offer it back rather
+    // than a guess. A node with none set shows "keep" and fails clearly later.
+    const cur = radioConfig.region ? REGION_NAMES.indexOf(radioConfig.region) : -1;
+    regionEl.value = cur > 0 ? String(cur) : '';
+    /** @type {HTMLInputElement} */ (el('setup-moving')).value = String(CADENCE.movingSecs);
+    /** @type {HTMLInputElement} */ (el('setup-still')).value = String(CADENCE.stationarySecs);
+    /** @type {HTMLInputElement} */ (el('setup-move-m')).value = String(CADENCE.moveThresholdM);
+    el('setup-node').textContent = myInfo.num ? nodeId(myInfo.num) : 'node not identified yet';
+    el('setup-log').replaceChildren();
+    /** @type {HTMLButtonElement} */ (el('setup-apply')).disabled = false;
+    dialog.showModal();
+  });
+  el('setup-cancel').addEventListener('click', () => dialog.close());
+  el('setup-form').addEventListener('submit', (e) => e.preventDefault());
+  el('setup-apply').addEventListener('click', () => void runSetup());
+}
+
+async function runSetup() {
+  const s = source;
+  if (!s || s.status() !== 'connected') return;
+
+  const log = el('setup-log');
+  log.replaceChildren();
+  /** @type {Map<string, HTMLLIElement>} */
+  const items = new Map();
+  /** @type {import('./provision.js').Report} */
+  const report = (step, state, detail) => {
+    let li = items.get(step);
+    if (!li) {
+      li = document.createElement('li');
+      items.set(step, li);
+      log.appendChild(li);
+    }
+    li.className = state;
+    li.textContent = SETUP_STEPS[step] + (detail ? ` — ${detail}` : state === 'run' ? ' …' : '');
+  };
+  const note = (/** @type {string} */ cls, /** @type {string} */ text) => {
+    const li = document.createElement('li');
+    li.className = cls;
+    li.textContent = text;
+    log.appendChild(li);
+  };
+  const num = (/** @type {string} */ id, /** @type {number} */ fallback) => {
+    const v = Number(/** @type {HTMLInputElement} */ (el(id)).value);
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  };
+
+  const apply = /** @type {HTMLButtonElement} */ (el('setup-apply'));
+  apply.disabled = true;
+  const longName = /** @type {HTMLInputElement} */ (el('setup-long')).value;
+  const shortName = /** @type {HTMLInputElement} */ (el('setup-short')).value;
+  const regionVal = /** @type {HTMLSelectElement} */ (el('setup-region')).value;
+
+  try {
+    const out = await provisionTracker(
+      { send: (b) => s.send(b), onAdmin, myNodeNum: () => myInfo.num },
+      {
+        longName,
+        shortName,
+        region: regionVal ? Number(regionVal) : undefined,
+        movingSecs: num('setup-moving', CADENCE.movingSecs),
+        stationarySecs: num('setup-still', CADENCE.stationarySecs),
+        moveThresholdM: num('setup-move-m', CADENCE.moveThresholdM),
+      },
+      report);
+
+    // It is a collar now, by definition; say so before it is ever heard, and
+    // keep the name so the card is labelled on first contact.
+    roles.set(out.nodeId, 'collar');
+    primeNodeName(out.nodeId, { long: longName.trim(), short: shortName.trim() });
+    void store.putDevice(out.nodeId, { role: 'collar', long: longName.trim(), short: shortName.trim() })
+      .catch((err) => console.warn('collar save failed', err));
+
+    note('done', `${out.nodeId} is now "${longName.trim()}" on ${out.preset} / ${out.region}. ` +
+      'Disconnecting — connect your own radio to watch it.');
+    // The transport would otherwise spend the next minute reconnecting to a
+    // rebooting collar the user is about to put on a dog.
+    await s.disconnect();
+    render();
+  } catch (err) {
+    note('error', err instanceof Error ? err.message : String(err));
+    apply.disabled = false;
+  }
 }
 
 /**

@@ -1,10 +1,12 @@
 // @ts-check
 /**
- * Minimal protobuf wire-format reader.
+ * Minimal protobuf wire format: a reader, and just enough of a writer to talk
+ * to a radio.
  *
- * This exists so the app has no dependency tree. It decodes only; it does not
- * encode messages beyond the few bytes needed to talk to a radio, and it knows
- * nothing about .proto schemas -- callers map field numbers themselves.
+ * This exists so the app has no dependency tree. It knows nothing about .proto
+ * schemas -- callers map field numbers themselves. Encoding is field by field
+ * (see putUint and friends) plus patchMessage, which rewrites chosen fields of
+ * an existing message while carrying every other byte through untouched.
  *
  * Wire format reference: field tag = (field_number << 3) | wire_type.
  */
@@ -176,4 +178,95 @@ export function putVarint(n) {
  */
 export function putField(field, wire, body) {
   return [...putVarint(field * 8 + wire), ...body];
+}
+
+/**
+ * Encode a length-delimited field: bytes, a string, or a nested message.
+ * @param {number} field
+ * @param {ArrayLike<number>} bytes
+ * @returns {number[]}
+ */
+export function putBytes(field, bytes) {
+  return putField(field, WIRE.LEN, [...putVarint(bytes.length), ...Array.from(bytes)]);
+}
+
+/**
+ * @param {number} field
+ * @param {string} s
+ * @returns {number[]}
+ */
+export function putString(field, s) {
+  return putBytes(field, new TextEncoder().encode(s));
+}
+
+/**
+ * Unsigned varint field: uint32, bool as 0/1, or an enum.
+ *
+ * Zero is written rather than omitted. Proto3 encoders drop default values,
+ * but a oneof member must be present even when its value is zero -- an
+ * AdminMessage asking for DEVICE_CONFIG (= 0) is nothing but that zero. The
+ * decoder reads an explicit zero and an absent field identically, so writing
+ * it never hurts.
+ * @param {number} field
+ * @param {number} n
+ * @returns {number[]}
+ */
+export function putUint(field, n) {
+  return putField(field, WIRE.VARINT, putVarint(n));
+}
+
+/**
+ * @param {number} field
+ * @param {boolean} b
+ * @returns {number[]}
+ */
+export function putBool(field, b) {
+  return putUint(field, b ? 1 : 0);
+}
+
+/**
+ * @param {number} field
+ * @param {number} n
+ * @returns {number[]}
+ */
+export function putFixed32(field, n) {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, n >>> 0, true);
+  return putField(field, WIRE.I32, [...b]);
+}
+
+/**
+ * Rewrite chosen fields of an encoded message, keeping everything else.
+ *
+ * Radio configuration messages are written whole: a set_config carrying only
+ * `role` would reset every other setting in that block to zero, including
+ * ones this code has never heard of. Reading the current message, replacing
+ * the handful of fields that matter and sending the rest back byte for byte
+ * is what makes a change to one setting leave the others alone -- and it
+ * stays correct as firmware adds fields, because unknown fields pass through
+ * without being understood.
+ *
+ * A patched field replaces every occurrence of that number; a null patch
+ * removes it. Patches are appended in the order given.
+ *
+ * @param {Uint8Array} buf
+ * @param {Record<number, number[]|null>} patches field number -> encoded field (tag included), or null
+ * @returns {number[]}
+ */
+export function patchMessage(buf, patches) {
+  const drop = new Set(Object.keys(patches).map(Number));
+  const r = new Reader(buf);
+  /** @type {number[]} */
+  const out = [];
+  while (!r.done) {
+    const start = r.pos;
+    const tag = r.varint();
+    const field = Math.floor(tag / 8);
+    r.skip(tag % 8);
+    if (!drop.has(field)) out.push(...buf.subarray(start, r.pos));
+  }
+  for (const enc of Object.values(patches)) {
+    if (enc) out.push(...enc);
+  }
+  return out;
 }

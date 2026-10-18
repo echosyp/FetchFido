@@ -91,6 +91,42 @@ select, input[type="text"] {
 input[type="text"] { width: 11em; font-family: ui-monospace, monospace; }
 input[hidden] { display: none; }
 
+/* Collar setup dialog */
+.setup {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  width: min(92vw, 460px);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.setup::backdrop { background: rgba(0, 0, 0, 0.6); }
+.setup h2 { margin: 0 0 8px; font-size: 17px; }
+.setup .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.setup label { display: block; margin: 10px 0; font-size: 14px; }
+.setup label small { color: var(--muted); }
+.setup label > input[type="text"], .setup label > select {
+  display: block; width: 100%; margin-top: 4px; font-family: inherit;
+}
+.setup input[type="number"] {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 14px; width: 6em;
+}
+.setup .cadence { border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px 8px; margin: 12px 0; }
+.setup .cadence legend { color: var(--muted); font-size: 13px; padding: 0 4px; }
+.setup .cadence label { margin: 6px 0; }
+.setup .cadence .hint { margin: 6px 0 0; }
+.setup-log { margin: 12px 0 0; padding-left: 22px; font-size: 13px; min-height: 1em; }
+.setup-log li { margin: 3px 0; color: var(--muted); }
+.setup-log li.run { color: var(--warn); }
+.setup-log li.ok { color: var(--ok); }
+.setup-log li.fail, .setup-log li.error { color: var(--bad); list-style: none; margin-left: -22px; }
+.setup-log li.done { color: var(--ok); list-style: none; margin-left: -22px; font-weight: 600; }
+.setup-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+#setup-cancel { background: var(--border); }
+
 main {
   flex: 1;
   display: flex;

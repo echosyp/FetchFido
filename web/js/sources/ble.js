@@ -134,6 +134,12 @@ export class BleSource extends BaseSource {
     }, wait);
   }
 
+  /** @param {Uint8Array} payload */
+  async send(payload) {
+    if (!this._toRadio) throw new Error('not connected');
+    await this._toRadio.writeValue(payload);
+  }
+
   async disconnect() {
     this._wantConnected = false;
     if (this._retryTimer) {

@@ -21,6 +21,9 @@
  * @property {(cb: (p: Position) => void) => void} onPosition
  * @property {(cb: (s: SourceStatus, detail?: string) => void) => void} onStatus
  * @property {() => SourceStatus} status
+ * @property {(payload: Uint8Array) => Promise<void>} send  Write one ToRadio
+ *   message to the connected node. Used to configure the node itself
+ *   (js/provision.js); position traffic never needs it.
  */
 
 export {};

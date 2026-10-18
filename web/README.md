@@ -15,8 +15,9 @@ Node to treat `.js` as ES modules when running the tests. Nothing is installed
 and nothing is fetched from it. Browsers ignore it entirely.
 
 The cost of this choice is that the Meshtastic protocol is decoded by hand in
-`js/protobuf.js` and `js/meshtastic.js`, about 300 lines total. The benefit is
-that every byte reaching a browser is reviewable in this tree.
+`js/protobuf.js` and `js/meshtastic.js`, and the admin messages that configure
+a node are encoded by hand in `js/provision.js`. The benefit is that every
+byte reaching a browser is reviewable in this tree.
 
 ## Layout
 
@@ -32,6 +33,7 @@ js/sources/ble.js   Web Bluetooth transport
 js/sources/wifi.js  HTTP transport (the only one iOS can use)
 js/sources/serial.js Web Serial transport (cable; preferred off-grid)
 js/framing.js       Meshtastic stream framing (serial only)
+js/provision.js     configure the connected node as a collar (AdminMessages)
 js/store.js         IndexedDB, deduped on [deviceId, ts]
 js/geo.js           distance, bearing, relative bearing, freshness
 js/heading.js       device compass (DeviceOrientation)
@@ -159,6 +161,39 @@ plain http -- that is mixed content, and no CSP setting overrides it. So:
 Keep the local server for range testing over WiFi; use the hosted copy for
 field work over cable or Bluetooth. They are not redundant.
 
+## Setting up a collar
+
+**Set up collar** configures the radio that is *currently connected* as a
+tracker on the public mesh, so a stock Meshtastic node becomes a collar
+without touching the official app. Connect the collar node (cable is
+simplest), open the dialog, give it the dog's name, apply; it saves, reboots
+and drops the link. Then connect your own radio again to watch it.
+
+What it writes, as AdminMessages over the live transport:
+
+| Setting | Value | Why |
+|---|---|---|
+| Owner | the dog's name, marked unmessagable | so radios show a dog, not a person to chat with |
+| Channel 0 | LongFast, default key, full position precision | the public mesh; coarsened positions cannot find a dog |
+| Device role | TRACKER, no rebroadcast | priority positions; a collar is a poor relay |
+| Position | smart broadcast, GPS on, 30 s moving / 300 s resting / 30 m | the airtime budget in docs/DESIGN.md §3.2 |
+| LoRa | LongFast preset, region kept or chosen, TX on | must match the community mesh |
+
+Each block is **read first and patched**, not overwritten: a `set_config`
+carries the whole block, so sending only the role would zero every other
+setting, including ones this code has never heard of. The node's current bytes
+are sent back with the few fields that matter replaced. Writes happen inside
+an edit transaction, are **read back and compared** before commit, and nothing
+is committed if the node did not take a setting. The dialog reports each step.
+
+A node with no region set is refused unless one is chosen: the wrong band is
+both illegal and deaf to the mesh, and guessing is worse than asking.
+
+The field numbers come from the published schema. **Not yet run against
+hardware**: whether current firmware accepts position precision 32 as "full",
+and whether local admin needs the session passkey this sends regardless. Both
+are marked `[verify]` in `js/provision.js`.
+
 ## Surviving a walk
 
 Two things are handled that only matter once the phone is in a pocket:
@@ -209,6 +244,7 @@ node web/test/wifi.test.mjs     # HTTP transport, with fetch stubbed
 node web/test/framing.test.mjs  # serial stream framing
 node web/test/geo.test.mjs      # distance, bearing, arrow rotation
 node web/test/serial.test.mjs   # port matching for replug recovery
+node web/test/provision.test.mjs # collar setup against a fake node
 ```
 
 These build synthetic Meshtastic frames byte by byte and assert the decoder
@@ -278,8 +314,9 @@ The direction indicator needs a compass to point at anything. Without
 orientation -- it falls back to north-up and says so, because an arrow that
 looks absolute while being relative walks you the wrong way.
 
-Written but NOT yet run against hardware: BLE and USB cable transports. Both
-are the off-grid path, so verifying them matters more than anything else here.
+Written but NOT yet run against hardware: collar setup (`js/provision.js`).
+The conversation is tested against a fake node that behaves like firmware;
+the firmware itself has the final say.
 
 Not built: server transport, geofencing, device claiming, dog profiles,
 pre-cached offline map regions, any server at all.

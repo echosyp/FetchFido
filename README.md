@@ -64,7 +64,24 @@ only collars you have claimed are stored, so a stranger's node heard on the
 public mesh never becomes a record in your account. It runs as a Cloudflare
 Worker: `cmd/worker` compiled to WebAssembly, D1 for storage, the PWA served
 from `web/` as static assets. Configuration is `wrangler.jsonc`; build with
-`make worker`. Deployment is `docs/TODO.md` item 3.
+`make worker`; deploy by hand with `npx wrangler@4 deploy`.
+
+Deploys are automatic through Workers Builds, which watches this repository.
+The settings, so they can be recreated (Cloudflare dashboard, the Worker's
+Settings, Build):
+
+| Setting | Value |
+|---|---|
+| Git branch | `saas-redesign` |
+| Build command | `make test` |
+| Deploy command | `npx wrangler@4 deploy` |
+| Root directory | `/` |
+| Non-production branch builds | off (`main` has no Worker configuration) |
+
+The build image provides Go 1.24 and Node 24, which is all `make test` and the
+`make worker` step inside `wrangler deploy` need. There is no `package.json`
+on purpose; wrangler is fetched by `npx` at deploy time, pinned to its major
+version. A failing test stops the deploy.
 
 ## API
 

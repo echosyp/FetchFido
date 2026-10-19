@@ -148,7 +148,9 @@ access token if the operator set one. See the root `README.md`.
 
 The hosted version is a Cloudflare Worker: the Go API compiled to WebAssembly,
 with this directory served as the Worker's static assets. `wrangler.jsonc` at
-the repository root configures it and `make worker` builds it.
+the repository root configures it and `make worker` builds it. Pushes to
+`saas-redesign` deploy automatically through Workers Builds; the settings are
+in the root `README.md`.
 
 `_headers` sets what the meta CSP cannot: `frame-ancestors`, which browsers
 ignore in a `<meta>` tag. It also marks `sw.js` and the app shell

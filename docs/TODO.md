@@ -76,6 +76,8 @@ WASM plus the assets (`web/.assetsignore` keeps tests and READMEs out). The
 first deploy found that password hashing in WebAssembly blew the free plan's
 10 ms CPU limit (Cloudflare error 1102); the derivation now runs in the browser
 (`web/js/kdf.js`, `internal/auth`). Cold start measured 7 ms, a login round
-trip well under the limit. Not yet done: connect the repository to Workers
-Builds so a push to this branch deploys (the build image needs Go 1.24+ for
-`make worker`; verify), and a custom domain.
+trip well under the limit. The Workers Builds settings are in the root
+`README.md` (branch `saas-redesign`, build `make test`, deploy
+`npx wrangler@4 deploy`); the build image ships Go 1.24.3 and Node 24, so
+nothing extra is needed. Connecting the repository is a dashboard step. Still
+open: a custom domain.

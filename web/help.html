@@ -99,8 +99,7 @@ this. To see what the server is doing: <code>podman logs -f fetchfido</code>.</p
 <p>The image is 11 MB: one static Go binary and an empty <code>/data</code>,
 built <code>FROM scratch</code>. It runs as an unprivileged user, has no shell, and
 makes no outbound connections. The database is SQLite in the volume, so a backup
-is a copy of one file. Source, build instructions and the full README are at
-<a href="https://github.com/echosyp/FetchFido">github.com/echosyp/FetchFido</a>.</p>
+is a copy of one file.</p>
 
 <p class="muted">Prefer not to run anything? The hosted version at
 <a href="https://fetchfido.echosyp.workers.dev">fetchfido.echosyp.workers.dev</a>

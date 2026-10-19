@@ -550,7 +550,12 @@ func staticHandler(web fs.FS) http.Handler {
 		h := w.Header()
 		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "no-referrer")
+		// Origin only, and only cross-site. OpenStreetMap's tile servers
+		// require a Referer and serve an "access blocked" tile without one;
+		// no-referrer broke the map on the first hosted deploy. The origin
+		// is all they get, never the path. web/_headers says the same for
+		// the Worker, which serves these files itself.
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/vendor/"):

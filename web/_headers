@@ -1,4 +1,4 @@
-# Cloudflare Pages response headers.
+# Cloudflare response headers, honoured by the Worker's static-assets binding.
 #
 # These complement the meta CSP in index.html. frame-ancestors in particular is
 # IGNORED when delivered via <meta> and only works as a real header, so this is
@@ -7,7 +7,7 @@
 /*
   Content-Security-Policy: frame-ancestors 'none'
   X-Content-Type-Options: nosniff
-  Referrer-Policy: no-referrer
+  Referrer-Policy: strict-origin-when-cross-origin
   Cross-Origin-Opener-Policy: same-origin
 
 # A cached service worker cannot update itself, which strands every visitor on

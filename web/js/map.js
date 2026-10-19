@@ -31,9 +31,15 @@ export class TrackMap {
   constructor(elementId) {
     this.map = L.map(elementId, { center: [0, 0], zoom: 2, zoomControl: true });
 
+    // OpenStreetMap's usage policy requires a Referer on tile requests and
+    // answers an "access blocked" tile without one. The server headers allow
+    // it (Referrer-Policy strict-origin-when-cross-origin); setting it on the
+    // tile images as well keeps the map working behind a self-hoster's proxy
+    // that tightens the page policy. Only the origin is sent, never the path.
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 19,
+      referrerPolicy: 'strict-origin-when-cross-origin',
     }).addTo(this.map);
 
     /** @type {Map<string, any>} */

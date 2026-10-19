@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -326,5 +327,45 @@ func TestSyncLimitsAndContentType(t *testing.T) {
 	res2, _ := http.DefaultClient.Do(req)
 	if res2.StatusCode != 400 {
 		t.Fatalf("content type: %d", res2.StatusCode)
+	}
+}
+
+// The static handler's headers. Referrer-Policy matters more than it looks:
+// OpenStreetMap serves an "access blocked" tile to requests without a Referer,
+// and no-referrer here took the map down on the first hosted deploy.
+func TestStaticHeaders(t *testing.T) {
+	web := fstest.MapFS{
+		"web/index.html":        {Data: []byte("<!doctype html>")},
+		"web/vendor/leaflet.js": {Data: []byte("// leaflet")},
+	}
+	db, err := sql.Open("sqlite", "file::memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(db)
+	if err := st.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(api.New(st, api.Config{Mode: api.ModeSingle}, web))
+	t.Cleanup(srv.Close)
+
+	for path, cache := range map[string]string{"/": "no-cache, must-revalidate", "/vendor/leaflet.js": "public, max-age=31536000, immutable"} {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		want := map[string]string{
+			"Content-Security-Policy":    "frame-ancestors 'none'",
+			"X-Content-Type-Options":     "nosniff",
+			"Referrer-Policy":            "strict-origin-when-cross-origin",
+			"Cross-Origin-Opener-Policy": "same-origin",
+			"Cache-Control":              cache,
+		}
+		for k, v := range want {
+			if got := res.Header.Get(k); got != v {
+				t.Errorf("%s %s = %q, want %q", path, k, got, v)
+			}
+		}
 	}
 }

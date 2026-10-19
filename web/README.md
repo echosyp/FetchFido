@@ -68,7 +68,7 @@ is *not* a secure context and the Connect button will fail:
 
 ### WiFi transport
 
-Pick **WiFi** in the transport dropdown and enter the node's address
+Pick **Network** in the transport dropdown and enter the node's address
 (`192.168.1.50`, or `node.lan`). The scheme is optional; `http://` is assumed.
 
 This needs no secure context, so it works from a phone over plain http on the
@@ -164,7 +164,8 @@ Hosting over TLS gives a permanent secure context: geolocation, compass,
 service worker, install, Web Bluetooth and Web Serial all work, and an
 installed copy keeps working with no network at all.
 
-**It also breaks the WiFi transport.** An https page cannot fetch a node over
+**It also breaks the WiFi transport.** The hosted version therefore does not
+offer **Network** in the dropdown at all. An https page cannot fetch a node over
 plain http -- that is mixed content, and no CSP setting overrides it. So:
 
 | | Hosted (https) | Local server (http) |

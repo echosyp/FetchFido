@@ -157,7 +157,7 @@ async function boot() {
     // picked rather than after a failed connect.
     if (kind === 'wifi' && location.protocol === 'https:') {
       el('status').textContent =
-        'WiFi needs the http copy — https cannot reach an http node';
+        'Network needs the http copy — https cannot reach an http node';
       el('status').className = 'status offline';
       btn.disabled = true;
       return;
@@ -237,7 +237,25 @@ async function boot() {
   wireSetup();
   wireAccount();
 
-  sync.onStatus(renderSync);
+  // The hosted version is https with no http copy, so the Network transport
+  // can never work there and offering it only leads to the mixed-content dead
+  // end. Known once the server has answered /api/v1/me. The option is removed
+  // rather than hidden because iOS Safari ignores `hidden` on <option>. A
+  // self-hosted accounts server over plain http keeps it.
+  const dropNetworkOnHosted = () => {
+    const opt = transportEl.querySelector('option[value="wifi"]');
+    if (!opt || sync.info?.mode !== 'accounts' || location.protocol !== 'https:') return;
+    opt.remove();
+    if (transportEl.value !== 'ble' && transportEl.value !== 'serial') {
+      transportEl.value = 'ble';
+      savePrefs({ transport: 'ble', address: addressEl.value });
+      syncTransportUi();
+    }
+  };
+  sync.onStatus((state, detail, pending) => {
+    renderSync(state, detail, pending);
+    dropNetworkOnHosted();
+  });
   // Positions other phones or gateways uploaded. Not re-queued for upload.
   sync.onPull((p) => void onPosition(p, false));
   // Not awaited: a slow or absent server must not delay the map.

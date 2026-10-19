@@ -127,6 +127,7 @@ input[hidden] { display: none; }
 .setup::backdrop { background: rgba(0, 0, 0, 0.6); }
 .setup h2 { margin: 0 0 8px; font-size: 17px; }
 .setup .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.setup .hint a { color: #58a6ff; }
 .setup label { display: block; margin: 10px 0; font-size: 14px; }
 .setup label small { color: var(--muted); }
 .setup label > input[type="text"], .setup label > select {

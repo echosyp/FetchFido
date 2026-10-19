@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run your own FetchFido server</title>
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'none';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self';
+  object-src 'none';
+  base-uri 'none';
+  form-action 'none'">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  p, li { color: var(--text); }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px; overflow-x: auto; font-size: 13px; line-height: 1.45; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  p code, li code, td code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .note { border-left: 3px solid var(--warn); padding: 2px 12px; color: var(--muted); }
+  nav { margin-bottom: 20px; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<nav><a href="./">&larr; Back to the app</a></nav>
+
+<h1>Run your own FetchFido server</h1>
+<p class="muted">One container, one volume, no accounts. Your collars' positions stay on your
+own machine and never touch the hosted service.</p>
+
+<h2>1. Start it</h2>
+<p>With Podman (or Docker: the commands are identical with <code>docker</code> in
+place of <code>podman</code>):</p>
+<pre><code>podman run -d --name fetchfido --restart unless-stopped \
+  -p 8080:8080 \
+  -v fetchfido-data:/data \
+  -e ACCESS_TOKEN='choose-a-long-secret' \
+  quay.io/f0c8bbv93/fetchfido:latest</code></pre>
+<p>Then open <code>http://127.0.0.1:8080</code> on that machine, or
+<code>http://&lt;its address&gt;:8080</code> from a phone on the same network.
+Tap the <strong>no server</strong> badge in the header, enter the token, and the
+phone syncs everything it hears to the server from then on.</p>
+
+<h2>2. The access token</h2>
+<p>There are no accounts in this mode, so the token is all that stands between the
+server and anyone who can reach its port: every position your collars have ever
+reported, the CSV export, and the ability to upload or delete. Leave it out only
+on a network you trust completely; the server logs a warning when it is unset.
+It is one shared secret for the household, entered once per phone.</p>
+
+<h2>3. Settings</h2>
+<p>All optional, passed as <code>-e NAME=value</code>:</p>
+<table>
+  <tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
+  <tr><td><code>ACCESS_TOKEN</code></td><td><em>none</em></td><td>Required from every client when set.</td></tr>
+  <tr><td><code>RETENTION_DAYS</code></td><td><code>30</code></td><td>Positions older than this are deleted. <code>0</code> keeps them forever.</td></tr>
+  <tr><td><code>AUTH_MODE</code></td><td><code>single</code></td><td><code>accounts</code> gives each person their own login and their own collars, the way the hosted version works.</td></tr>
+  <tr><td><code>REGISTRATION</code></td><td><code>open</code></td><td>Accounts mode: <code>closed</code> stops new sign-ups.</td></tr>
+  <tr><td><code>TLS_CERT_FILE</code>, <code>TLS_KEY_FILE</code></td><td><em>none</em></td><td>Serve HTTPS directly; mount the files into the container.</td></tr>
+  <tr><td><code>LISTEN</code></td><td><code>:8080</code></td><td>Address inside the container. Change the <code>-p</code> mapping instead.</td></tr>
+</table>
+
+<h2>4. HTTPS, or not</h2>
+<p class="note">Bluetooth, GPS and installing the app as a home-screen icon all need a
+secure page: <code>https://</code>, or <code>http://127.0.0.1</code> on the same
+machine. The <strong>Network</strong> transport, which talks to a node over WiFi,
+needs the opposite: a plain <code>http://</code> page, because a secure page
+may not fetch from an http address. Pick what you need. For HTTPS on a home
+network, a certificate the phones trust is required; a self-signed one that the
+phone has not been told to trust is not enough.</p>
+
+<h2>5. Updating</h2>
+<pre><code>podman pull quay.io/f0c8bbv93/fetchfido:latest
+podman stop fetchfido && podman rm fetchfido
+# then the run command from step 1 again</code></pre>
+<p>Positions and settings live in the <code>fetchfido-data</code> volume and survive
+this. To see what the server is doing: <code>podman logs -f fetchfido</code>.</p>
+
+<h2>6. What is in the box</h2>
+<p>The image is 11 MB: one static Go binary and an empty <code>/data</code>,
+built <code>FROM scratch</code>. It runs as an unprivileged user, has no shell, and
+makes no outbound connections. The database is SQLite in the volume, so a backup
+is a copy of one file. Source, build instructions and the full README are at
+<a href="https://github.com/echosyp/FetchFido">github.com/echosyp/FetchFido</a>.</p>
+
+<p class="muted">Prefer not to run anything? The hosted version at
+<a href="https://fetchfido.echosyp.workers.dev">fetchfido.echosyp.workers.dev</a>
+is the same app with accounts; only collars you mark are stored there.</p>
+</main>
+</body>
+</html>

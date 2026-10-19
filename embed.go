@@ -9,6 +9,6 @@ package fetchfido
 
 import "embed"
 
-//go:embed web/index.html web/sw.js web/favicon.svg web/manifest.webmanifest
+//go:embed web/index.html web/help.html web/sw.js web/favicon.svg web/manifest.webmanifest
 //go:embed web/css web/js web/vendor/leaflet.css web/vendor/leaflet.js
 var Web embed.FS

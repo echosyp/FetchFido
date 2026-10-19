@@ -469,7 +469,7 @@ function wireAccount() {
 
     el('account-info').textContent = !info
       ? 'This page is not served by a FetchFido server, so there is nothing to sync to. ' +
-        'Tracking works exactly the same without one. See README.md to run a server, or use the hosted version.'
+        'Tracking works exactly the same without one. Run your own server (link below), or use the hosted version.'
       : accounts && signedIn
         ? `Signed in as ${info.email}. Positions from collars you mark are stored for ${info.retentionDays || 'unlimited'} days.`
       : accounts

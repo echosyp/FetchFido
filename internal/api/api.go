@@ -563,6 +563,16 @@ func staticHandler(web fs.FS) http.Handler {
 		default:
 			h.Set("Cache-Control", "no-cache, must-revalidate")
 		}
+		// The help page is linked as /help, extensionless, because the
+		// Worker's asset routing redirects /help.html there and a service
+		// worker must never cache a redirect for a navigation. Serve the same
+		// path here so the one link works on both deployments.
+		if r.URL.Path == "/help" {
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/help.html"
+			files.ServeHTTP(w, r2)
+			return
+		}
 		files.ServeHTTP(w, r)
 	})
 }

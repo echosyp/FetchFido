@@ -336,6 +336,7 @@ func TestSyncLimitsAndContentType(t *testing.T) {
 func TestStaticHeaders(t *testing.T) {
 	web := fstest.MapFS{
 		"web/index.html":        {Data: []byte("<!doctype html>")},
+		"web/help.html":         {Data: []byte("<!doctype html><title>help</title>")},
 		"web/vendor/leaflet.js": {Data: []byte("// leaflet")},
 	}
 	db, err := sql.Open("sqlite", "file::memory:")
@@ -348,6 +349,17 @@ func TestStaticHeaders(t *testing.T) {
 	}
 	srv := httptest.NewServer(api.New(st, api.Config{Mode: api.ModeSingle}, web))
 	t.Cleanup(srv.Close)
+
+	// /help is served extensionless on both deployments; see staticHandler.
+	res, err := http.Get(srv.URL + "/help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(body), "<title>help</title>") || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("/help: %d %q %q", res.StatusCode, res.Header.Get("Content-Type"), body)
+	}
 
 	for path, cache := range map[string]string{"/": "no-cache, must-revalidate", "/vendor/leaflet.js": "public, max-age=31536000, immutable"} {
 		res, err := http.Get(srv.URL + path)

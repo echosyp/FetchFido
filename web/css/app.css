@@ -88,6 +88,18 @@ body {
   overflow-x: auto;
 }
 
+/* Pushed to the far right of the button row; a link, not a button, because
+   it leaves the app. */
+.controls .help {
+  margin-left: auto;
+  align-self: center;
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+.controls .help:hover { color: var(--text); }
+
 button {
   background: var(--accent);
   color: #fff;
